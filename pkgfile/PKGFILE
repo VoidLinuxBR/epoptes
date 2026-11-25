@@ -1,4 +1,4 @@
-# Maintainer : Eduardo Charquero <eduardo.charquero@gmail.com>
+# Maintainer: Vilmar Catafesta <vcatafesta@gmail.com>
 #
 # Um repositorio (voidlinuxbr/epoptes), dois pacotes - como o AUR faz:
 # a arvore usr/ etc/ tem servidor e cliente juntos e cada package_*()
