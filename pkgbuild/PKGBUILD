@@ -36,7 +36,7 @@ source=(
 )
 sha256sums=(
 	'SKIP'
-	'e47d0894f56a35081d4c9211ecdf6f6f8eaab816f6b43825570b60f7e4a12090'
+	'e8bb37d965f5d1ebadb8bb7c090d804c085c2b9a002ef05c2668cccdc894b04d'
 )
 
 # arquivos que sao so do cliente (o resto da arvore e do servidor)

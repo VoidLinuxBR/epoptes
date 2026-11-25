@@ -1,3 +1,20 @@
+diff --git a/etc/default/epoptes-client b/etc/default/epoptes-client
+index a4d2006..273d33f 100644
+--- a/etc/default/epoptes-client
++++ b/etc/default/epoptes-client
+@@ -12,3 +12,12 @@
+ 
+ # Set Wake On LAN for devices that support it. Comment it out to disable it.
+ WOL=g
++
++# VoidBR: ambientes que nao rodam o autostart do XDG (Umbriel, Sway, Hyprland,
++# river, labwc, i3, dwm...) nao sobem sozinhos a conexao da sessao. O servico
++# do cliente (root) vigia as sessoes graficas e, se a conexao da sessao nao
++# aparecer em SESSION_WATCH_GRACE segundos, sobe o epoptes-client como o
++# usuario. Para desligar: SESSION_WATCH=false
++#SESSION_WATCH=true
++#SESSION_WATCH_INTERVAL=10
++#SESSION_WATCH_GRACE=30
 diff --git a/usr/bin/epoptes b/usr/bin/epoptes
 index ac7b570..848abb8 100755
 --- a/usr/bin/epoptes
@@ -1214,7 +1231,7 @@ index 720c958..608b391 100644
          if (clients != [] or handles != []) and warning != '':
              if not self.confirmation_dialog(warning):
 diff --git a/usr/sbin/epoptes-client b/usr/sbin/epoptes-client
-index 7a2ee2a..a014d6d 100755
+index 7a2ee2a..84f441e 100755
 --- a/usr/sbin/epoptes-client
 +++ b/usr/sbin/epoptes-client
 @@ -9,8 +9,10 @@
@@ -1251,7 +1268,7 @@ index 7a2ee2a..a014d6d 100755
          fi
          if [ "$delay" -eq 5 ]; then
              echo "Cannot resolve $SERVER, will keep retrying."
-@@ -164,6 +172,237 @@ EOF
+@@ -164,6 +172,247 @@ EOF
      fi
  }
  
@@ -1466,6 +1483,16 @@ index 7a2ee2a..a014d6d 100755
 +    fi
 +
 +    if [ "$UID" -eq 0 ]; then
++        if my_boolean_is_true "${SESSION_WATCH:-true}"; then
++            if [ -s /run/epoptes-client/session-watch/pid ] &&
++                kill -0 "$(cat /run/epoptes-client/session-watch/pid)" 2>/dev/null; then
++                check_ok "vigia de sessoes ativo (sobe a conexao da sessao em Umbriel, Sway, Hyprland...)"
++            else
++                check_info "vigia de sessoes nao esta rodando (reinicie o servico epoptes-client)"
++            fi
++        else
++            check_info "vigia de sessoes desligado (SESSION_WATCH=false)"
++        fi
 +        check_info "rode tambem como usuario, na sessao grafica, para testar a miniatura"
 +    elif [ -n "$WAYLAND_DISPLAY" ] || [ -n "$DISPLAY" ]; then
 +        if err=$(cd "$dir" && ./thumbshot.py 16 12 2>&1 >/dev/null); then
@@ -1489,7 +1516,7 @@ index 7a2ee2a..a014d6d 100755
  # Main.
  version
  
-@@ -185,6 +424,10 @@ case "$1" in
+@@ -185,6 +434,10 @@ case "$1" in
      need_certificate=true
      shift
      ;;
@@ -1500,7 +1527,7 @@ index 7a2ee2a..a014d6d 100755
  esac
  
  # Set a reasonable PATH to execute commands or to relaunch epoptes-client.
-@@ -209,6 +452,8 @@ export "PORT=${2:-$PORT}"
+@@ -209,6 +462,8 @@ export "PORT=${2:-$PORT}"
  test -n "$need_certificate" && fetch_certificate
  
  servercrt=/etc/epoptes/server.crt
@@ -1509,7 +1536,7 @@ index 7a2ee2a..a014d6d 100755
  # Don't launch as root on epoptes servers, unless there's a main server
  if [ "$UID" -eq 0 ] && [ $TYPE = "standalone" ] && [ -x /usr/bin/epoptes ]; then
      if [ -s /etc/epoptes/main-server.crt ]; then
-@@ -270,6 +515,12 @@ else
+@@ -270,6 +525,21 @@ else
      cert_param="verify=0"
  fi
  
@@ -1519,9 +1546,174 @@ index 7a2ee2a..a014d6d 100755
 +    check_certificate &
 +fi
 +
++# VoidBR patch: no root, vigia as sessoes graficas e sobe a conexao da sessao
++# onde o ambiente nao roda o autostart do XDG (Umbriel, Sway, Hyprland, river,
++# i3...). Sai sozinho quando este processo (o socat, depois do exec) acabar.
++if [ "$UID" -eq 0 ] && my_boolean_is_true "${SESSION_WATCH:-true}" &&
++    [ -x ./session-watch ]; then
++    SESSION_WATCH_INTERVAL=$SESSION_WATCH_INTERVAL SESSION_WATCH_GRACE=$SESSION_WATCH_GRACE \
++        ./session-watch $$ </dev/null >/dev/null &
++fi
++
  # Connect to the server, or keep retrying until the server gets online
  # (for standalone workstations booted before the server).
  if [ -s "$servercrt" ] || [ "$cert_param" = "verify=0" ]; then
+diff --git a/usr/share/epoptes-client/session-watch b/usr/share/epoptes-client/session-watch
+new file mode 100755
+index 0000000..9bbc122
+--- /dev/null
++++ b/usr/share/epoptes-client/session-watch
+@@ -0,0 +1,150 @@
++#!/bin/sh
++# -*- coding: utf-8 -*-
++#
++#  session-watch — VoidBR: sobe a conexao da sessao do epoptes-client quando
++#                  o ambiente grafico nao roda o autostart do XDG
++#  Created: qua 25 nov 2026 10:55:00 -04
++#  Updated: qua 25 nov 2026 10:55:00 -04
++#
++#  Copyright (c) 2026, Vilmar Catafesta <vcatafesta@gmail.com>
++#  SPDX-License-Identifier: GPL-3.0-or-later
++#
++# O epoptes-client da sessao (o que observa a tela, tira miniatura etc.) sobe
++# pelo /etc/xdg/autostart/epoptes-client.desktop. GNOME, KDE e XFCE rodam esse
++# autostart; Umbriel, Sway, Hyprland, river, labwc, i3, dwm... nao. Este vigia
++# roda como root, junto da conexao do root (o epoptes-client do servico), e a
++# cada SESSION_WATCH_INTERVAL segundos procura usuarios com sessao grafica e
++# sem conexao de sessao. Se a conexao nao aparecer em SESSION_WATCH_GRACE
++# segundos (tempo de o autostart agir, onde existe), sobe o epoptes-client
++# como o usuario, com o ambiente da sessao dele (WAYLAND_DISPLAY/DISPLAY,
++# XDG_RUNTIME_DIR, D-Bus).
++#
++# Uso: session-watch <pid>   (sai quando o processo <pid> terminar)
++# Desligar: SESSION_WATCH=false em /etc/default/epoptes-client
++
++_VERSION_="1.0.0-20261125"
++
++pai=$1
++interval=${SESSION_WATCH_INTERVAL:-10}
++grace=${SESSION_WATCH_GRACE:-30}
++state=/run/epoptes-client/session-watch
++client=/usr/sbin/epoptes-client
++test -x "$client" || client=$(command -v epoptes-client)
++
++test "$(id -u)" -eq 0 || exit 0
++test -n "$pai" || exit 0
++
++cd / || exit 0
++mkdir -p "$state" || exit 0
++# Um vigia so: o novo substitui o anterior (reinicio do servico)
++if [ -s "$state/pid" ]; then
++    kill "$(cat "$state/pid")" 2>/dev/null
++fi
++echo $$ >"$state/pid"
++trap 'rm -f "$state/pid"; exit 0' INT TERM
++
++uid_min=$(awk '$1 == "UID_MIN" { print $2; exit }' /etc/login.defs 2>/dev/null)
++uid_min=${uid_min:-1000}
++
++log() {
++    echo "epoptes-client session-watch: $*" >&2
++}
++
++# Imprime "usuario pid" de um processo por usuario com sessao grafica local:
++# WAYLAND_DISPLAY ou DISPLAY=:N no ambiente, sem SSH_CONNECTION (ssh -X nao
++# e sessao da tela). Do mais antigo para o mais novo: fica o primeiro, que
++# normalmente e o proprio compositor ou a sessao.
++graphical_sessions() {
++    ps -e --sort=start_time -o uid=,user:32=,pid= |
++        while read -r uid user pid; do
++            test "$uid" -ge "$uid_min" 2>/dev/null && test "$uid" -lt 65534 || continue
++            env=$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null) || continue
++            case "$env" in
++            *SSH_CONNECTION=*) continue ;;
++            esac
++            echo "$env" | grep -Eq '^(WAYLAND_DISPLAY=.|DISPLAY=:)' || continue
++            echo "$user $pid"
++        done | awk '!visto[$1]++'
++}
++
++# A sessao do usuario ja tem conexao? (cada conexao e um processo socat)
++has_session_conn() {
++    ps -C socat -o user:32= 2>/dev/null | grep -qx "$1"
++}
++
++# Valor de uma variavel no ambiente do processo $1
++env_of() {
++    tr '\0' '\n' <"/proc/$1/environ" 2>/dev/null | sed -n "s/^$2=//p" | head -n 1
++}
++
++launch() {
++    local_user=$1
++    local_pid=$2
++    wd=$(env_of "$local_pid" WAYLAND_DISPLAY)
++    dp=$(env_of "$local_pid" DISPLAY)
++    rt=$(env_of "$local_pid" XDG_RUNTIME_DIR)
++    test -n "$rt" || rt=/run/user/$(id -u "$local_user")
++    # Ambiente de outra sessao que ja acabou (socket sumiu): nao sobe nada
++    if [ -n "$wd" ]; then
++        case "$wd" in
++        /*) test -S "$wd" ;;
++        *) test -S "$rt/$wd" ;;
++        esac || return 0
++    elif [ -n "$dp" ]; then
++        n=${dp#:}
++        n=${n%%.*}
++        test -S "/tmp/.X11-unix/X$n" || return 0
++    fi
++    home=$(getent passwd "$local_user" | cut -d: -f6)
++    log "sessao grafica de $local_user sem conexao: iniciando o epoptes-client da sessao"
++    # shellcheck disable=SC2046
++    setsid -f setpriv --reuid="$(id -u "$local_user")" --regid="$(id -g "$local_user")" --init-groups \
++        env -i HOME="$home" USER="$local_user" LOGNAME="$local_user" \
++        SHELL="$(getent passwd "$local_user" | cut -d: -f7)" \
++        PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin" \
++        XDG_RUNTIME_DIR="$rt" \
++        $(for v in WAYLAND_DISPLAY DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS \
++            XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE \
++            XDG_SESSION_ID DESKTOP_SESSION LANG LANGUAGE LC_ALL; do
++            val=$(env_of "$local_pid" "$v")
++            test -n "$val" && printf '%s=%s\n' "$v" "$val"
++        done) \
++        "$client" </dev/null >/dev/null 2>&1
++}
++
++while kill -0 "$pai" 2>/dev/null; do
++    agora=$(date +%s)
++    vistos=""
++    for linha in $(graphical_sessions | tr ' ' ':'); do
++        user=${linha%%:*}
++        pid=${linha#*:}
++        vistos="$vistos $user"
++        if has_session_conn "$user"; then
++            rm -f "$state/$user"
++            continue
++        fi
++        # Primeira vez sem conexao: marca e espera o autostart (se existir)
++        if ! [ -s "$state/$user" ]; then
++            echo "$agora" >"$state/$user"
++            continue
++        fi
++        desde=$(cat "$state/$user")
++        if [ $((agora - desde)) -ge "$grace" ]; then
++            launch "$user" "$pid"
++            # Conta de novo: se ainda nao conectar, tenta outra vez depois
++            echo "$agora" >"$state/$user"
++        fi
++    done
++    # Quem saiu da sessao grafica perde a marca
++    for f in "$state"/*; do
++        u=${f##*/}
++        test "$u" = pid && continue
++        test -e "$f" || continue
++        case " $vistos " in
++        *" $u "*) ;;
++        *) rm -f "$f" ;;
++        esac
++    done
++    sleep "$interval"
++done
++rm -f "$state/pid"
 diff --git a/usr/share/epoptes-client/thumbshot.py b/usr/share/epoptes-client/thumbshot.py
 index 557829c..eeadacc 100755
 --- a/usr/share/epoptes-client/thumbshot.py

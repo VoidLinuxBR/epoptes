@@ -61,7 +61,7 @@ Depois, em cada cliente:
 
         sudo systemctl enable --now epoptes-client
 
-4. Entre na sessão gráfica. A conexão da sessão sobe sozinha no login (/etc/xdg/autostart/epoptes-client.desktop).
+4. Entre na sessão gráfica. A conexão da sessão sobe sozinha no login: pelo autostart (/etc/xdg/autostart/epoptes-client.desktop) em GNOME, KDE e XFCE, ou pelo vigia de sessões nos ambientes sem autostart (veja abaixo).
 
 ## Como o cliente se conecta
 
@@ -71,6 +71,30 @@ Cada cliente abre duas conexões com o servidor:
 - **Conexão da sessão**, aberta no login do usuário. É por ela que funcionam a miniatura, observar, assistir, mensagens e bloquear a tela.
 
 Se só existe a conexão do root, a máquina aparece com o ícone "std" e sem miniatura.
+
+### Vigia de sessões (Umbriel, Sway, Hyprland, river, i3...)
+
+Só alguns ambientes rodam o autostart do XDG (GNOME, KDE, XFCE...). Em compositores como Umbriel, Sway, Hyprland, river, labwc, e em gerenciadores de janela X11 como i3 e dwm, a conexão da sessão não subiria sozinha.
+
+Por isso o serviço do cliente (a conexão do root) roda um vigia: a cada 10 segundos ele procura usuários com sessão gráfica (WAYLAND_DISPLAY ou DISPLAY local, sem contar ssh -X) e sem conexão de sessão. Se a conexão não aparecer em 30 segundos, ele inicia o epoptes-client como aquele usuário, com o ambiente da sessão dele. Onde o autostart existe, a conexão chega antes e o vigia não faz nada.
+
+O vigia é configurado em /etc/default/epoptes-client:
+
+| Opção | Padrão | O que faz |
+|---|---|---|
+| SESSION_WATCH | true | false desliga o vigia |
+| SESSION_WATCH_INTERVAL | 10 | segundos entre as verificações |
+| SESSION_WATCH_GRACE | 30 | segundos de espera pelo autostart antes de subir a conexão |
+
+Depois de mudar, reinicie o serviço (sudo sv restart epoptes-client no Void, sudo systemctl restart epoptes-client no Arch). O `epoptes-client --check` como root mostra se o vigia está ativo.
+
+Com o vigia desligado, a alternativa é pôr o epoptes-client no autostart do próprio compositor. Exemplos:
+
+| Ambiente | Arquivo | Linha |
+|---|---|---|
+| Umbriel | ~/.config/umbriel/config.toml | na tabela [general]: autostart = ["/usr/sbin/epoptes-client"] |
+| Hyprland | ~/.config/hypr/hyprland.conf | exec-once = /usr/sbin/epoptes-client |
+| Sway / i3 | ~/.config/sway/config, ~/.config/i3/config | exec /usr/sbin/epoptes-client |
 
 ## Usando a janela principal
 
@@ -93,7 +117,7 @@ Embaixo do nome de cada máquina aparece um selo:
 | ⚠ Sem conexão do root | o serviço epoptes-client da máquina não está conectado |
 | ⚠ Miniatura falhou | a captura da tela falhou no cliente; o motivo aparece na dica |
 
-O aviso "Sessão não conectou" costuma ser o grupo epoptes, o autostart ou o certificado, e pode levar até uns 20 segundos para aparecer depois do login.
+O aviso "Sessão não conectou" costuma ser o grupo epoptes, o autostart (ou o vigia de sessões desligado) ou o certificado, e pode levar até uns 20 segundos para aparecer depois do login. Em ambientes sem autostart, o vigia leva até uns 40 segundos para subir a conexão.
 
 ### Dica
 
@@ -219,6 +243,8 @@ Ele confere: arquivos do pacote, serviço habilitado e rodando (runit ou systemd
 **O servidor não mostra nenhum cliente.** No cliente, rode epoptes-client --check. As causas mais comuns são o certificado diferente do servidor (rode sudo epoptes-client -c e reinicie o serviço do cliente e a sessão), o nome do servidor que não resolve (ajuste SERVER= em /etc/default/epoptes-client ou o /etc/hosts) e a porta 789 bloqueada no firewall do servidor.
 
 **A máquina aparece como "std" e sem miniatura.** Só a conexão do root chegou. Veja se alguém está logado; se está, use Clientes > Diagnosticar cliente ou o --check na sessão do aluno.
+
+**"Sessão não conectou" em Umbriel, Sway, Hyprland, i3...** Esses ambientes não rodam o autostart; quem sobe a conexão é o vigia de sessões, até uns 40 segundos depois do login. Se não subir, rode epoptes-client --check como root no aluno: ele diz se o vigia está ativo (veja "Vigia de sessões").
 
 **Sessão duplicada.** Use Clientes > Reconectar sessão na conexão mais nova (a dica diz qual). No cliente, o --check mostra o comando para encerrar as sobrando (pkill -KILL -P com o PID).
 
