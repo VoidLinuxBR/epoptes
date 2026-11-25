@@ -1,82 +1,204 @@
-# Maintainer: Vilmar Catafesta <vcatafesta@gmail.com>
+# Maintainer : Eduardo Charquero <eduardo.charquero@gmail.com>
+#
+# Um repositorio (voidlinuxbr/epoptes), dois pacotes - como o AUR faz:
+# a arvore usr/ etc/ tem servidor e cliente juntos e cada package_*()
+# leva so a sua parte. As traducoes (usr/share/locale) vao nos dois.
+# Requer pkgmake 1.12 ou mais novo (pacotes divididos).
 
-pkgname=voidbr-pkgname
-pkgdesc="Package template for VoidBR"
+pkgname=(voidbr-epoptes voidbr-epoptes-client)
+pkgbase=voidbr-epoptes
+_reponame=epoptes
 pkgver=$(date +%Y%m%d)
 pkgrel=$(date +%H%M)
-provides=()  # "eu SOU o $pkgname pkg1, pra quem depender deles"
-replaces=()  # "remove o pkg1 pkg2 antigo automaticamente quando eu instalar"
-conflicts=() # "nunca me deixe coexistir com o pkg1 pkg2 original"
-arch=('any')
-license=('MIT')
-#url="ssh://git@github.com/voidlinuxbr/${pkgname}"
-url="https://github.com/voidlinuxbr/${pkgname}"
-source=("git+${url}.git")
-md5sums=('SKIP')
-makedepends=()
-depends=()
-backup=()
+pkgdesc='An opensource computer lab management and monitoring tool'
+makedepends=(git python3 python3-distutils-extra intltool patch)
+url="https://github.com/voidlinuxbr/${_reponame}"
+source=(
+	"git+${url}.git"
+	"voidbr-epoptes.patch"
+)
+license=(GPL3)
+arch=(any)
+sha256sums=(
+	'SKIP'
+	'e47d0894f56a35081d4c9211ecdf6f6f8eaab816f6b43825570b60f7e4a12090'
+)
 
-# Automatically detect and use the correct install file
-if [ -e "${pkgname}.install" ]; then
-	install=${pkgname}.install
-elif [ -e "pkgbuild.install" ]; then
-	install=pkgfile.install
-fi
+# o que os DOIS usam
+depends=(
+	gobject-introspection
+	gtk+3
+	iperf
+	iproute2
+	librsvg
+	openssl
+	python3-cairo
+	python3-gobject
+	socat
+	tigervnc
+	x11vnc
+	xterm
+)
 
-package() {
-	# Verify default folder
-	if [ -d "${srcdir}/${pkgname}/${pkgname}" ]; then
-		InternalDir="${srcdir}/${pkgname}/${pkgname}"
-	elif [ -d "${srcdir}/${pkgname}" ]; then
-		InternalDir="${srcdir}/${pkgname}"
-	else
-		#local
-		InternalDir="${WORKDIR}"
-	fi
+# arquivos que sao so do cliente (o resto da arvore e do servidor)
+_cliente=(
+	etc/default/epoptes-client
+	etc/sv/epoptes-client
+	etc/xdg/autostart/epoptes-client.desktop
+	usr/lib/systemd/system/epoptes-client.service
+	usr/sbin/epoptes-client
+	usr/share/epoptes-client
+	usr/share/licenses/epoptes-client
+	usr/share/man/man8/epoptes-client.8
+)
 
-	cd "${InternalDir}"
-	# Copiar a estrutura de /etc, /usr e /opt para /
-	local dirs=("boot" "etc" "opt" "usr" "var")
-	for dir in "${dirs[@]}"; do
-		if [ -d "${InternalDir}/${dir}" ]; then
-			cp -a "${InternalDir}/${dir}" "${pkgdir}/"
-		fi
-	done
-
-	# Install license file if present
-	[ -f "LICENSE" ] && install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
-	# Install documentation if present
-	[ -f "README.md" ] && install -Dm644 README.md "${pkgdir}/usr/share/doc/${pkgname}/README.md"
-
+prepare() {
+	cd "${srcdir}/${_reponame}"
+	# VoidBR patch (gerado com ./gera-patch.sh, na raiz do repositorio).
+	# Servidor:
+	# - client-functions: lido pelo epoptesd e ENVIADO a cada cliente na
+	#   conexao; traz o suporte a Wayland (miniaturas, observar/assistir com
+	#   wayvnc ou gnome-remote-desktop + socat, PIDs em arquivo no
+	#   $XDG_RUNTIME_DIR, ping pelo socket do compositor).
+	# - gui.py/epoptes.ui: selos, Diagnosticar, Reconectar sessao, zoom,
+	#   menu Configuracoes, manual (F1); fix Python 3.14 (pipes -> shlex).
+	# - usr/bin/epoptes: aviso quando a sessao comecou antes do grupo epoptes.
+	# Cliente:
+	# - thumbshot.py: miniaturas em Wayland (grim / portal do GNOME / spectacle).
+	# - epoptes-client: --check (diagnostico), aviso de certificado trocado e
+	#   espera pelo nome do servidor (VPN subindo depois da rede).
+	patch -p1 < "${srcdir}/voidbr-epoptes.patch"
 }
 
+#################### servidor ####################
+package_voidbr-epoptes() {
+	pkgdesc+=' (servidor, com suporte a Wayland nos clientes)'
+	replaces=(epoptes)
+	depends+=(
+		faketime
+		libnotify
+		notification-daemon
+		python3-dbus
+		python3-netifaces
+		python3-openssl
+		python3-service_identity
+		python3-Twisted
+	)
+	optdepends=('xfce4-notifyd: XFCE notification support')
+	backup=(/etc/default/epoptes)
+
+	local dir p
+	cd "${srcdir}/${_reponame}"
+	for dir in usr etc opt; do
+		[ -d "$dir" ] && cp -a "$dir" "$DESTDIR/"
+	done
+	for p in "${_cliente[@]}"; do
+		rm -rf "${DESTDIR:?}/$p"
+	done
+	find "$DESTDIR" -depth -type d -empty -delete
+
+	# arquivos Python versionados em usr/lib/python3.14; se o python3 de quem
+	# gera o pacote for outro (3.15...), move para o caminho certo.
+	local pyver
+	pyver=$(python3 -c 'import sys; print("python%d.%d" % sys.version_info[:2])')
+	if [ -n "$pyver" ] && [ "$pyver" != python3.14 ] && [ -d "$DESTDIR/usr/lib/python3.14" ]; then
+		mv "$DESTDIR/usr/lib/python3.14" "$DESTDIR/usr/lib/$pyver"
+		find "$DESTDIR/usr/lib/$pyver" -type d -name __pycache__ -prune -exec rm -rf {} +
+	fi
+}
+
+#################### cliente ####################
+package_voidbr-epoptes-client() {
+	pkgdesc+=' (cliente, miniaturas em Wayland: Hyprland/wlroots, GNOME, KDE Plasma)'
+	replaces=(epoptes-client)
+	# grim      -> miniaturas em Hyprland/Sway/river/labwc (wlroots)
+	# wayvnc    -> observar/assistir em Hyprland/Sway/wlroots
+	# spectacle -> miniaturas em KDE Plasma Wayland
+	# xprop/xset/xwininfo -> sessoes X11
+	# GNOME com Wayland usa pacotes do proprio GNOME, que NAO entram aqui
+	# (sem eles o servidor avisa): gnome-remote-desktop, libsecret,
+	# xdg-desktop-portal-gnome. Void/xbps nao tem optdepends.
+	depends+=(
+		dbus
+		grim
+		procps-ng
+		python3-Pillow
+		screen
+		spectacle
+		wayvnc
+		xprop
+		xset
+		xwininfo
+	)
+	backup=(/etc/default/epoptes-client)
+
+	local p
+	cd "${srcdir}/${_reponame}"
+	for p in "${_cliente[@]}" usr/share/locale; do
+		mkdir -p "$DESTDIR/$(dirname "$p")"
+		cp -a "$p" "$DESTDIR/$p"
+	done
+}
+
+#################### hooks comuns (rodam nos dois) ####################
 pre_install() {
 	log "Iniciando instalação"
 }
-
-post_install() {
-	if [ "${update:-}" = "yes" ]; then
-		log "Finalizando upgrade"
-	else
-		log "Finalizando instalação"
-	fi
-
-	if [ -n "${MKISO_BUILD:-}" ]; then
-		echo "${YELLOW}[-]${RESET} Build de ISO detectado (MKISO_BUILD) — pulando."
-		return 0
-	fi
-
-	if [ -z "${VOIDBR_INSTALLER:-}" ]; then
-		:
-	fi
-
-}
-
 pre_upgrade() {
 	log "Iniciando upgrade"
 }
-
 post_upgrade() {
-	post_install
+	log "Finalizando upgrade"
+}
+post_install() {
+	if ! getent group epoptes >/dev/null; then
+		groupadd epoptes >/dev/null || true
+		echo "Group 'epoptes' has been added."
+	fi
+	usermod -aG epoptes "$user" >/dev/null || true
+	mkdir -p /etc/epoptes/ >/dev/null || true
+}
+
+#################### hooks do servidor (depois do comum) ####################
+post_install_voidbr-epoptes() {
+	if ! [ -s /etc/epoptes/server.key ] || ! [ -s /etc/epoptes/server.crt ]; then
+		faketime '1970-01-01 00:00:00 UTC' \
+			openssl req -batch -x509 -nodes \
+			-newkey rsa:4096 -days $(($(date --utc +%s) / 86400 + 3652)) \
+			-keyout /etc/epoptes/server.key -out /etc/epoptes/server.crt
+		chmod 600 /etc/epoptes/server.key
+		log "Certificado novo gerado em /etc/epoptes. Clientes que ja usavam este"
+		log "servidor precisam busca-lo: em cada cliente rode ${YELLOW}sudo epoptes-client -c${CYAN}"
+		log "e reinicie o servico epoptes-client e a sessao."
+	fi
+	ln -sf /etc/sv/epoptes /var/service/ >/dev/null || true
+	log "A instalação foi concluída. Antes de utilizar o Epoptes, lembre-se de fazer o seguinte:"
+	log "1.- Você deverá adicionar seu usuário ao grupo 'epoptes' - ${YELLOW}sudo usermod -aG epoptes $user"
+	log "2.- Você deverá executar como root:"
+	log "    ${YELLOW}'vservice enable epoptes' ${CYAN}para habilitar o serviço do servidor Epoptes."
+	log "3.- Pode ser necessário reiniciar o sistema para que tudo funcione corretamente."
+	log "4.- Se não quiser reiniciar o sistema, após realizar todos os passos acima, execute como root:"
+	log "    ${YELLOW}'vservice start epoptes' ${CYAN}para iniciar o serviço do servidor Epoptes."
+	log "Após concluir tudo isso, você ainda precisará encerrar a sessão e entrar novamente."
+	log "Feito isso, o Epoptes deverá funcionar normalmente.${RESET}"
+	log "Lembrete: o client-functions e lido so na inicializacao do epoptesd."
+	log "Se voce ja tinha o Epoptes rodando antes de atualizar, reinicie o"
+	log "serviço (${YELLOW}sudo vservice restart epoptes${CYAN}) para os clientes"
+	log "passarem a receber as funções novas de suporte a Wayland."
+}
+
+#################### hooks do cliente (depois do comum) ####################
+post_install_voidbr-epoptes-client() {
+	ln -sf /etc/sv/epoptes-client /var/service/ >/dev/null || true
+	log "A instalação foi concluída. Antes de utilizar o Epoptes, lembre-se de fazer o seguinte:"
+	log "1.- Você deverá adicionar seu usuário ao grupo 'epoptes' - ${YELLOW}sudo usermod -aG epoptes $user"
+	log "2.- Você deverá executar como root:"
+	log "    ${YELLOW}'vservice enable epoptes-client' ${CYAN}para habilitar o serviço de cliente Epoptes."
+	log "3.- Pode ser necessário reiniciar o sistema para que tudo funcione corretamente."
+	log "4.- Se não quiser reiniciar o sistema, após realizar todos os passos acima, execute como root:"
+	log "    ${YELLOW}'vservice start epoptes-client' ${CYAN}para iniciar o serviço do cliente Epoptes."
+	log "Após concluir tudo isso, você ainda precisará encerrar a sessão e entrar novamente."
+	log "Feito isso, o Epoptes deverá funcionar normalmente.${RESET}"
+	log "Se algo nao funcionar, rode ${YELLOW}epoptes-client --check${CYAN} como usuario,"
+	log "num terminal da sessao grafica, para ver o diagnostico.${RESET}"
 }

@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+#
+LIBRARY=${LIBRARY:-'/usr/share/chiliwebview/bcc/shell'}
+[[ -f "${LIBRARY}/pkgbuildlib.sh" ]] && source "${LIBRARY}/pkgbuildlib.sh"
+#
+declare IS_VERBOSE=true
+declare IS_UPGRADE=false
+declare IS_DBLOCK=false
+declare IS_METAPKG=false
+declare IS_SKEL=false
+declare pkgname=chili-epoptes
+declare servicesToEnable=(epoptes)
+declare servicesToDisable=()
+
+# Sem o chili-base-config (Arch puro), define o minimo que e usado abaixo.
+if ! declare -F sh_get_real_user >/dev/null; then
+  msg() { $IS_VERBOSE && echo -e "==>[${pkgname}] ${*}" >&2; }
+  log_ok() { $IS_VERBOSE && echo -e "==>[${pkgname}] [✓] ${*}"; }
+  log_err() { $IS_VERBOSE && echo -e "==>[${pkgname}] [✗] ${*}"; }
+  sh_init() { msg "Inicializando a instalação e configuração do pacote: $pkgname..."; }
+  sh_get_real_user() {
+    user="${SUDO_USER:-$USER}"
+    if ! getent passwd "$user" >/dev/null || [[ $user = root ]]; then
+      user=$(awk -F: '$3 >= 1000 && $3 < 65000 { print $1; exit }' /etc/passwd)
+    fi
+    user_home=$(getent passwd "$user" | cut -d: -f6)
+  }
+  ensure_group_user() {
+    getent group "$2" &>/dev/null || groupadd $3 "$2" &>/dev/null
+    [[ -n $1 ]] && { id -nG "$1" | grep -qw "$2" || gpasswd -a "$1" "$2" &>/dev/null; }
+  }
+  sh_enable_services() {
+    for service in "${servicesToEnable[@]}"; do
+      if systemctl enable "${service}" --force &>/dev/null; then
+        log_ok "Serviço ${service} ativado..."
+      else
+        log_err "Erro: Ocorreu um erro ao ativar o serviço ${service}"
+      fi
+    done
+  }
+  sh_copy_user_etc_usr_opt_files() {
+    msg "Copiando arquivos e diretórios..."
+    local dirs=("usr" "etc" "opt")
+    for dir in "${dirs[@]}"; do
+      if [ -d "/usr/share/${pkgname}/${dir}" ]; then
+        cp -a "/usr/share/${pkgname}/${dir}" "/"
+      fi
+    done
+  }
+  sh_finish() { msg "Configuração completa."; }
+fi
+
+sh_create_certificate() {
+  mkdir -p /etc/epoptes
+  if ! [[ -s /etc/epoptes/server.key ]] || ! [[ -s /etc/epoptes/server.crt ]]; then
+    msg "Gerando o certificado do servidor em /etc/epoptes..."
+    faketime '1970-01-01 00:00:00 UTC' \
+      openssl req -batch -x509 -nodes \
+      -newkey rsa:4096 -days $(($(date --utc +%s) / 86400 + 3652)) \
+      -keyout /etc/epoptes/server.key -out /etc/epoptes/server.crt &>/dev/null
+    chmod 600 /etc/epoptes/server.key
+    msg "Certificado novo: clientes que ja usavam este servidor precisam busca-lo."
+    msg "Em cada cliente rode ${yellow}sudo epoptes-client -c${reset} e reinicie o"
+    msg "servico epoptes-client e a sessao."
+  fi
+}
+
+# O sh_enable_services do pkgbuildlib.sh so faz "systemctl enable": sem o
+# epoptesd rodando nao existe /run/epoptes/epoptes.socket e a interface
+# cai no tunel SSH para o host "server". Inicia (ou reinicia, no upgrade)
+# o servico aqui - so com systemd de pe, nunca dentro de chroot/instalador.
+sh_start_epoptes() {
+  [[ -d /run/systemd/system ]] || return 0
+  [[ ${IN_CHROOT_INSTALLER:-false} = true ]] && return 0
+  if ! $IS_UPGRADE; then
+    if systemctl start epoptes &>/dev/null; then
+      log_ok "Serviço epoptes iniciado..."
+    else
+      log_err "Erro ao iniciar o serviço epoptes: veja ${yellow}journalctl -u epoptes -b"
+    fi
+  else
+    # O client-functions e lido so na inicializacao do epoptesd e enviado
+    # aos clientes; sem reiniciar, eles continuam com a versao antiga.
+    # try-restart: so reinicia se ja estiver rodando.
+    if systemctl try-restart epoptes &>/dev/null; then
+      log_ok "Serviço epoptes reiniciado (clientes recebem as funções novas)..."
+    else
+      log_err "Erro ao reiniciar o serviço epoptes: veja ${yellow}journalctl -u epoptes -b"
+    fi
+  fi
+}
+
+post_install() {
+  [[ $IS_VERBOSE = true ]] && sh_init                        || { sh_init 2>/dev/null                        || true; }
+  [[ $IS_VERBOSE = true ]] && sh_copy_user_etc_usr_opt_files || { sh_copy_user_etc_usr_opt_files 2>/dev/null || true; }
+  [[ $IS_VERBOSE = true ]] && sh_get_real_user               || { sh_get_real_user 2>/dev/null               || true; }
+
+  # As units do systemd foram copiadas fora do pacman (o hook de
+  # daemon-reload do pacman nao as ve), entao recarrega aqui.
+  systemctl daemon-reload &>/dev/null || true
+
+  ensure_group_user "$user" epoptes --system
+  sh_create_certificate
+
+  if ! $IS_UPGRADE; then
+    sh_enable_services
+  fi
+  sh_start_epoptes
+  if ! $IS_UPGRADE; then
+    msg "Encerre a sessão e entre novamente para valer o grupo 'epoptes'."
+    msg "Se não bastar (no GNOME e em outros ambientes com systemd, a sessão"
+    msg "pode reaproveitar os grupos antigos), reinicie o computador."
+  fi
+
+  sh_finish
+}
+
+post_upgrade() {
+  IS_UPGRADE=true
+  post_install
+}
+
+# Modelo Chili: o post_install copia /usr/share/${pkgname}/{usr,etc,opt} para /,
+# e essas copias nao pertencem ao pacman - o pacman -R so apagaria
+# /usr/share/${pkgname}. Antes da remocao, apaga as copias, exceto as que
+# pertencem a outro pacote do pacman ou que outro pacote no modelo Chili tambem
+# copia (por exemplo, as traducoes compartilhadas entre servidor e cliente).
+sh_remove_copied_files() {
+  local stage="/usr/share/${pkgname}" rel other shared dir
+  [[ -d $stage ]] || return 0
+  msg "Removendo os arquivos copiados para / ..."
+  while IFS= read -r -d '' rel; do
+    rel=${rel#"$stage"}
+    [[ -e $rel || -L $rel ]] || continue
+    pacman -Qoq "$rel" &>/dev/null && continue
+    shared=false
+    for other in /usr/share/*/; do
+      [[ ${other%/} = "$stage" ]] && continue
+      if [[ -e ${other%/}$rel ]]; then
+        shared=true
+        break
+      fi
+    done
+    $shared || rm -f "$rel"
+  done < <(find "$stage/usr" "$stage/etc" "$stage/opt" -type f -print0 2>/dev/null)
+  # Pastas que ficaram vazias (das mais fundas para as mais rasas), menos as
+  # que pertencem a algum pacote do pacman.
+  while IFS= read -r dir; do
+    dir=${dir#"$stage"}
+    [[ -d $dir ]] || continue
+    pacman -Qoq "$dir/" &>/dev/null && continue
+    rmdir "$dir" 2>/dev/null
+  done < <(find "$stage/usr" "$stage/etc" "$stage/opt" -mindepth 1 -type d 2>/dev/null | sort -r)
+}
+
+pre_remove() {
+  [[ $IS_VERBOSE = true ]] && sh_init || { sh_init 2>/dev/null || true; }
+  if [[ -d /run/systemd/system ]]; then
+    systemctl disable --now epoptes &>/dev/null || true
+  fi
+  sh_remove_copied_files
+}
+
+post_remove() {
+  if [[ -d /run/systemd/system ]]; then
+    systemctl daemon-reload &>/dev/null || true
+  fi
+  msg "O grupo 'epoptes' e o certificado em /etc/epoptes foi mantido."
+}

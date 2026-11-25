@@ -1,0 +1,2604 @@
+diff --git a/usr/bin/epoptes b/usr/bin/epoptes
+index ac7b570..848abb8 100755
+--- a/usr/bin/epoptes
++++ b/usr/bin/epoptes
+@@ -75,6 +75,52 @@ def need_sg_relaunch():
+     return True
+ 
+ 
++def need_relogin():
++    """VoidBR/Chili patch: o usuario ja esta no grupo do socket em
++    /etc/group, mas a sessao atual comecou antes disso (os grupos de um
++    processo sao definidos no login) e o sg nao resolveu - no Arch nem
++    existe /usr/bin/sg. Sem este aviso, epoptes_socket() nao enxerga o
++    socket dentro de /run/epoptes (2770 root:epoptes), cai no tunel SSH
++    para o host "server" e falha com um erro confuso."""
++    if not os.path.isdir(config.system['DIR']):
++        return False
++    socket = config.system['DIR'] + '/epoptes.socket'
++    if os.access(socket, os.W_OK):
++        return False
++    try:
++        group = grp.getgrnam(config.system['SOCKET_GROUP'])
++    except KeyError:
++        return False
++    if getpass.getuser() not in group.gr_mem:
++        return False
++    if group.gr_gid in os.getgroups():
++        return False
++    return True
++
++
++def relogin_dialog():
++    """VoidBR/Chili patch: explica que e preciso iniciar uma sessao nova."""
++    group = config.system['SOCKET_GROUP']
++    msg = ("O usuário <b>%s</b> já está no grupo <b>%s</b>, mas esta "
++           "sessão foi iniciada antes disso e ainda não tem o grupo.\n\n"
++           "Encerre a sessão e entre novamente para usar o Epoptes. "
++           "Se isso não bastar (no GNOME e em outros ambientes com systemd, "
++           "a sessão pode reaproveitar os grupos antigos), reinicie o "
++           "computador.\n\n"
++           "Para usar agora sem sair, rode num terminal:\n"
++           "<tt>newgrp %s</tt>\n<tt>epoptes &amp;</tt>") % \
++        (getpass.getuser(), group, group)
++    LOG.w("User is in group %s but this session doesn't have it yet; "
++          "log out and back in (or reboot, if the session reuses the old "
++          "groups), or run: newgrp %s" % (group, group))
++    dlg = Gtk.MessageDialog(type=Gtk.MessageType.WARNING,
++                            buttons=Gtk.ButtonsType.OK)
++    dlg.set_markup(msg)
++    dlg.set_title('Epoptes')
++    dlg.run()
++    dlg.destroy()
++
++
+ def gui_ip():
+     """Return the IP that the GUI uses to contact epoptes server.
+     It's constant as SSH will stay up for socket forwarding to work.
+@@ -146,6 +192,9 @@ def main():
+ 
+     if need_sg_relaunch():
+         sys.exit(0)
++    if need_relogin():
++        relogin_dialog()
++        sys.exit(1)
+ 
+     path = os.path.expanduser('~/.config')
+     if not os.path.isdir(path):
+diff --git a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
+index 720c958..608b391 100644
+--- a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
++++ b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
+@@ -4,10 +4,61 @@
+ # SPDX-License-Identifier: GPL-3.0-or-later
+ """
+ Epoptes GUI class.
++
++PATCH (VoidBR):
++  1. "import pipes" -> "import shlex" / pipes.quote -> shlex.quote.
++     O modulo "pipes" foi removido no Python 3.13 (shlex.quote e o
++     substituto direto, mesma assinatura).
++  2. reverse_connection(): usado por "Observar"/"Assistir" (duplo-
++     clique). Ver comentario na propria funcao para o detalhe do bug
++     que isso corrige (vncviewer -listen que fica "vivo" mas para de
++     aceitar novas sessoes RFB).
++  3. Selos de estado e dica (tooltip) em cada cliente, e o item
++     "Diagnosticar cliente..." no menu Clientes. Os selos comparam as
++     conexoes de cada maquina (root e sessao) com os campos novos do
++     info (session=, desktop=) e com os usuarios logados que a conexao
++     do root informa (graphical_users, perguntado a cada 20 s). O
++     diagnostico roda o epoptes-client --check no cliente (diagnose).
++     As funcoes do lado do cliente ficam no client-functions.
++  4. Miniatura que falha mostra o motivo (selo e dica), vindo do
++     cliente como VBR_THUMBSHOT_ERROR=<motivo>.
++  5. Observar/Assistir avisa antes, e deixa de fora, os clientes que
++     nao tem como atender (GNOME/KDE no Wayland, ou sem wayvnc/x11vnc).
++  6. Item "Reconectar sessao": refaz a conexao da sessao (reconnect);
++     numa conexao duplicada, so encerra a escolhida (reconnect drop).
++  7. Zoom da fonte da interface, como nos voidbr-*-tweaks: botoes A-,
++     100% e A+ no fim da barra de ferramentas e Ctrl +, Ctrl - e Ctrl 0.
++     Vai de 70% a 200%, em passos de 10%, vale para todas as janelas
++     do epoptes e fica salvo em font_scale, na secao [GUI] do settings.
++     Os icones crescem junto: os de arquivo sao redesenhados a partir do
++     SVG (os PNG de 16 px dos menus tem o SVG equivalente em images/), e
++     os do tema mudam de tamanho em pixels. Toda janela que aparece
++     (dialogos, Sobre, diagnostico) recebe o mesmo zoom nos icones, no
++     tamanho inicial e nos atalhos. As miniaturas dos clientes continuam
++     no controle proprio, embaixo.
++  8. Observar/Assistir no GNOME com Wayland, pelo servidor VNC do proprio
++     GNOME (ver o item 9 do client-functions). Ele exige senha: a cada
++     Observar/Assistir o servidor gera uma, manda junto no comando e a
++     passa ao visualizador em VNC_PASSWORD, que o TigerVNC le no lugar de
++     perguntar. Os outros visualizadores perguntam a senha.
++  9. Ajuda > Manual do VoidBR (F1): mostra o LEIAME.md (tudo o que esta
++     versao faz e como usar) numa janela propria, com titulos, listas,
++     tabelas e comandos formatados, sem depender de navegador.
++ 10. Miniatura de cliente GNOME com Wayland a cada 60 s (ajustavel em
++     thumbshots_gnome_seconds), em vez de 5 s: la ela vem do portal de
++     captura, que pisca a tela e toca o som de camera a cada captura.
++ 11. Menu Configuracoes: janela com os ajustes que antes so davam para mudar
++     no arquivo settings (ou nem isso): intervalos das miniaturas (GNOME e
++     demais clientes), prender teclado e mouse no Auxiliar usuario, titulo
++     e formatacao das mensagens, zoom da fonte, nomes reais e o intervalo
++     da conferencia de usuarios logados. Tudo vale na hora e fica na secao
++     [GUI] do ~/.config/epoptes/settings de cada professor.
+ """
+ from distutils.version import LooseVersion
+ import os
+-import pipes
++import xml.etree.ElementTree as ET
++import re
++import shlex
+ import random
+ import socket
+ import string
+@@ -21,13 +72,16 @@ from epoptes.ui.about import About
+ from epoptes.ui.benchmark import Benchmark
+ from epoptes.ui.client_information import ClientInformation
+ from epoptes.ui.common import gettext as _
++from epoptes.ui.common import locate_resource
+ from epoptes.ui.exec_command import ExecCommand
+ from epoptes.ui.notifications import NotifyQueue
+ from epoptes.ui.send_message import SendMessage
+ 
+-from gi.repository import Gdk, GdkPixbuf, GLib, Gtk
++from gi.repository import Gdk, GdkPixbuf, GLib, GObject, Gtk
+ 
+ LOG = logger.Logger(__file__)
++# VoidBR patch: limites do zoom da fonte, os mesmos dos voidbr-*-tweaks
++ESCALA_MIN, ESCALA_MAX = 0.7, 2.0
+ 
+ 
+ class EpoptesGui(object):
+@@ -79,6 +133,11 @@ class EpoptesGui(object):
+         self.vncserver_pwd = None
+         self.vncviewer = None
+         self.vncviewer_port = None
++        # VoidBR patch: o info de cada conexao (handle -> dict) e os usuarios
++        # logados que a conexao do root de cada maquina informa.
++        self.conn_info = {}
++        self.sys_gusers = {}
++        self.thumb_errors = {}
+ 
+         self.builder = Gtk.Builder()
+         self.builder.add_from_file('epoptes.ui')
+@@ -98,7 +157,11 @@ class EpoptesGui(object):
+         self.set_labels_order(1, 0, None)
+         self.icv_clients.set_model(self.cstore)
+         self.icv_clients.set_pixbuf_column(C_PIXBUF)
+-        self.icv_clients.set_text_column(C_LABEL)
++        # VoidBR patch: markup, para o selo de estado embaixo do nome.
++        self.icv_clients.set_markup_column(C_LABEL)
++        self.icv_clients.set_has_tooltip(True)
++        self.icv_clients.connect(
++            'query-tooltip', self.on_icv_clients_query_tooltip)
+         self.cstore.set_sort_column_id(C_LABEL, Gtk.SortType.ASCENDING)
+         self.on_icv_clients_selection_changed(None)
+         self.icv_clients.enable_model_drag_source(
+@@ -167,6 +230,14 @@ class EpoptesGui(object):
+         mitem.set_active(True)
+         self.get('cmi_show_real_names').set_active(self.show_real_names)
+         self.mainwin.set_sensitive(False)
++        self.gusers_timer = GLib.timeout_add_seconds(
++            self.gusers_interval(), self.poll_graphical_users)
++        self.setup_font_zoom()
++        # VoidBR patch: F1 abre o manual (e aparece no menu)
++        atalhos = Gtk.AccelGroup()
++        self.mainwin.add_accel_group(atalhos)
++        self.get('imi_help_manual').add_accelerator(
++            'activate', atalhos, Gdk.KEY_F1, 0, Gtk.AccelFlags.VISIBLE)
+ 
+     def save_settings(self):
+         """Helper function for on_imi_file_quit_activate."""
+@@ -276,38 +347,86 @@ class EpoptesGui(object):
+ 
+     def reverse_connection(self, cmd, *args):
+         """Helper function for on_imi_broadcasts_*_activate."""
+-        # Open vncviewer in listen mode
+-        if self.vncviewer is None or self.vncviewer.poll() is not None:
+-            self.vncviewer_port = self.find_unused_port()
+-            if os.path.isfile('/usr/share/applications/realvnc-vncviewer.desktop'):
+-                viewer = 'realvnc-vnc-viewer'
+-            elif os.path.isfile('/usr/bin/ssvncviewer'):
+-                viewer = 'ssvncviewer'
+-            else:
+-                viewer = os.path.realpath('/usr/bin/vncviewer')
+-                viewer = os.path.basename(viewer)
+-            if viewer == 'realvnc-vnc-viewer':
+-                scmd = ['vncviewer', '-uselocalcursor=0', '-scaling=aspectfit',
+-                       '-securitynotificationtimeout=0', '-warnunencrypted=0',
+-                       '-enabletoolbar=0', '-listen', str(self.vncviewer_port)]
+-            elif viewer == 'ssvncviewer':
+-                scmd = ['ssvncviewer', '-scale', 'auto', '-multilisten',
+-                       str(self.vncviewer_port-5500)]
+-            elif viewer == 'xtigervncviewer':
+-                scmd = ['xtigervncviewer', '-listen', str(self.vncviewer_port)]
+-            elif viewer == 'xtightvncviewer':
+-                scmd = ['xtightvncviewer', '-listen',
+-                       str(self.vncviewer_port-5500)]
+-            elif viewer == 'xvnc4viewer':
+-                scmd = ['xvnc4viewer',  '-uselocalcursor=0', '-listen',
+-                       str(self.vncviewer_port)]
+-            else:
+-                # A generic vncviewer, e.g. tigervnc on Arch/Fedora/SUSE
+-                scmd = ['vncviewer', '-listen', str(self.vncviewer_port)]
+-            self.vncviewer = subprocess.Popen(scmd)
++        # VoidBR patch: avisa antes, e deixa de fora, quem nao tem como
++        # atender, em vez de abrir um visualizador que nunca recebe nada.
++        targets = self.get_selected_clients() or list(self.cstore)
++        bad = []
++        for row in targets:
++            reason = self.observe_unsupported(row)
++            if reason and (self.row_name(row), reason) not in bad:
++                bad.append((self.row_name(row), reason))
++        good = [row for row in targets if not self.observe_unsupported(row)]
++        if bad:
++            names = '\n'.join('\u2022 %s: %s' % x for x in bad)
++            if not good:
++                self.warning_dialog(
++                    'Observar/Assistir n\u00e3o funciona %s:\n\n%s' % (
++                        'neste cliente' if len(bad) == 1
++                        else 'nestes clientes', names))
++                return
++            self.warning_dialog(
++                'Observar/Assistir n\u00e3o funciona nestes clientes, que '
++                'ficam de fora:\n\n' + names)
++        # VoidBR fix: o TigerVNC (-listen) as vezes fica "vivo" (processo
++        # nao sai sozinho) mas para de aceitar novas sessoes RFB depois
++        # que a primeira termina. Confiar em self.vncviewer.poll() pra
++        # decidir se reaproveita o listener antigo faz a segunda
++        # tentativa de observar sempre falhar com "connection dropped
++        # by the server before the session could be established".
++        # Por isso agora sempre encerramos o anterior e subimos um novo.
++        if self.vncviewer is not None and self.vncviewer.poll() is None:
++            self.vncviewer.terminate()
++            try:
++                self.vncviewer.wait(timeout=2)
++            except subprocess.TimeoutExpired:
++                self.vncviewer.kill()
++
++        self.vncviewer_port = self.find_unused_port()
++        if os.path.isfile('/usr/share/applications/realvnc-vncviewer.desktop'):
++            viewer = 'realvnc-vnc-viewer'
++        elif os.path.isfile('/usr/bin/ssvncviewer'):
++            viewer = 'ssvncviewer'
++        else:
++            viewer = os.path.realpath('/usr/bin/vncviewer')
++            viewer = os.path.basename(viewer)
++        if viewer == 'realvnc-vnc-viewer':
++            scmd = ['vncviewer', '-uselocalcursor=0', '-scaling=aspectfit',
++                   '-securitynotificationtimeout=0', '-warnunencrypted=0',
++                   '-enabletoolbar=0', '-listen', str(self.vncviewer_port)]
++        elif viewer == 'ssvncviewer':
++            scmd = ['ssvncviewer', '-scale', 'auto', '-multilisten',
++                   str(self.vncviewer_port-5500)]
++        elif viewer == 'xtigervncviewer':
++            scmd = ['xtigervncviewer', '-listen', str(self.vncviewer_port)]
++        elif viewer == 'xtightvncviewer':
++            scmd = ['xtightvncviewer', '-listen',
++                   str(self.vncviewer_port-5500)]
++        elif viewer == 'xvnc4viewer':
++            scmd = ['xvnc4viewer',  '-uselocalcursor=0', '-listen',
++                   str(self.vncviewer_port)]
++        else:
++            # A generic vncviewer, e.g. tigervnc on Arch/Fedora/SUSE
++            scmd = ['vncviewer', '-listen', str(self.vncviewer_port)]
++        # VoidBR patch: senha nova a cada Observar/Assistir, so usada pelos
++        # clientes GNOME (o servidor VNC do GNOME exige senha); o TigerVNC a
++        # le de VNC_PASSWORD. Vai como ultimo parametro do get_monitored
++        # ($2) e do get_assisted ($3, depois do "grab", que pode ser vazio).
++        senha = ''.join(random.SystemRandom().choice(
++            string.ascii_letters + string.digits) for _ in range(8))
++        self.vncviewer = subprocess.Popen(
++            scmd, env=dict(os.environ, VNC_PASSWORD=senha))
+ 
+         # And, tell the clients to connect to the server
+-        self.exec_on_selected_clients(' '.join([cmd, '"${GUI_IP}:%d"' % self.vncviewer_port] + list(args)))
++        args = list(args)
++        if cmd == 'get_assisted' and not args:
++            args = ["''"]
++        command = ' '.join(
++            [cmd, '"${GUI_IP}:%d"' % self.vncviewer_port] + args + [senha])
++        if bad:
++            self.exec_on_clients(command, good)
++        else:
++            self.exec_on_selected_clients(command)
++
+ 
+     def on_imi_broadcasts_monitor_user_activate(self, _widget):
+         """Handle imi_sbroadcasts_monitor_user.activate event."""
+@@ -504,6 +623,100 @@ class EpoptesGui(object):
+         subprocess.Popen('./remote_assistance.py',
+                          cwd='/usr/share/epoptes-client')
+ 
++    def on_imi_help_manual_activate(self, _widget):
++        """Handle imi_help_manual.activate event: show the LEIAME.md."""
++        try:
++            with open(locate_resource('LEIAME.md'), encoding='utf-8') as arq:
++                texto = arq.read()
++        except OSError as exc:
++            self.warning_dialog('N\u00e3o encontrei o manual (LEIAME.md):\n'
++                                + str(exc))
++            return
++        janela = Gtk.Window(title='Manual do Epoptes \u2014 VoidBR e Chili Linux',
++                            transient_for=self.mainwin)
++        janela.set_default_size(860, 640)
++        buf = Gtk.TextBuffer()
++        for nome, props in (
++                ('h1', {'weight': 800, 'scale': 1.6, 'pixels-above-lines': 6,
++                        'pixels-below-lines': 8}),
++                ('h2', {'weight': 800, 'scale': 1.3, 'pixels-above-lines': 14,
++                        'pixels-below-lines': 4}),
++                ('h3', {'weight': 700, 'scale': 1.1, 'pixels-above-lines': 10,
++                        'pixels-below-lines': 2}),
++                ('negrito', {'weight': 700}),
++                ('codigo', {'family': 'monospace', 'left-margin': 28,
++                            'paragraph-background': '#ececec',
++                            'foreground': '#202020'}),
++                ('tabela', {'family': 'monospace', 'left-margin': 12}),
++                ('cabecalho', {'family': 'monospace', 'left-margin': 12,
++                               'weight': 700}),
++                ('item', {'left-margin': 18, 'indent': -12})):
++            buf.create_tag(nome, **props)
++        self.render_markdown(buf, texto)
++        view = Gtk.TextView(buffer=buf, editable=False, cursor_visible=False,
++                            wrap_mode=Gtk.WrapMode.WORD_CHAR, left_margin=16,
++                            right_margin=16, top_margin=12, bottom_margin=12)
++        scw = Gtk.ScrolledWindow()
++        scw.add(view)
++        janela.add(scw)
++        janela.connect('key-press-event', lambda w, ev: (
++            ev.keyval == Gdk.KEY_Escape and w.destroy()) or False)
++        janela.show_all()
++
++    @staticmethod
++    def render_markdown(buf, texto):
++        """Insert a small subset of Markdown into a Gtk.TextBuffer: titles,
++        lists, tables, indented commands and **bold**."""
++        def inserir(linha, *tags):
++            # **negrito** dentro da linha
++            partes = re.split(r'\*\*(.+?)\*\*', linha)
++            for i, parte in enumerate(partes):
++                if not parte:
++                    continue
++                extra = ('negrito',) if i % 2 else ()
++                buf.insert_with_tags_by_name(
++                    buf.get_end_iter(), parte, *(tags + extra))
++            buf.insert(buf.get_end_iter(), '\n')
++
++        linhas = texto.split('\n')
++        i = 0
++        while i < len(linhas):
++            linha = linhas[i]
++            if linha.startswith('|'):
++                # Tabela: alinha as colunas em fonte fixa
++                bloco = []
++                while i < len(linhas) and linhas[i].startswith('|'):
++                    celulas = [c.strip() for c in
++                               linhas[i].strip().strip('|').split('|')]
++                    if not all(re.match(r'^:?-+:?$', c) for c in celulas):
++                        bloco.append([c.replace('**', '') for c in celulas])
++                    i += 1
++                larguras = [max(len(lin[c]) if c < len(lin) else 0
++                                for lin in bloco)
++                            for c in range(max(len(lin) for lin in bloco))]
++                for n, lin in enumerate(bloco):
++                    texto_lin = '  '.join(
++                        (lin[c] if c < len(lin) else '').ljust(larguras[c])
++                        for c in range(len(larguras))).rstrip()
++                    buf.insert_with_tags_by_name(
++                        buf.get_end_iter(), texto_lin + '\n',
++                        'cabecalho' if n == 0 else 'tabela')
++                buf.insert(buf.get_end_iter(), '\n')
++                continue
++            if linha.startswith('### '):
++                inserir(linha[4:], 'h3')
++            elif linha.startswith('## '):
++                inserir(linha[3:], 'h2')
++            elif linha.startswith('# '):
++                inserir(linha[2:], 'h1')
++            elif re.match(r'^ {4,}\S', linha):
++                inserir(linha.strip(), 'codigo')
++            elif linha.startswith('- '):
++                inserir('\u2022 ' + linha[2:], 'item')
++            else:
++                inserir(linha)
++            i += 1
++
+     def on_imi_help_about_activate(self, _widget):
+         """Handle imi_help_about_activate.activate event."""
+         if not self.about:
+@@ -629,6 +842,9 @@ class EpoptesGui(object):
+             single_client = True
+         self.get('imi_clients_information').set_sensitive(single_client)
+         self.get('tlb_clients_information').set_sensitive(single_client)
++        self.get('imi_clients_diagnose').set_sensitive(single_client)
++        self.get('imi_clients_reconnect').set_sensitive(
++            single_client and bool(selected[0][C_SESSION_HANDLE]))
+ 
+         if selected:
+             self.get('mni_add_to_group').set_sensitive(True)
+@@ -764,6 +980,9 @@ class EpoptesGui(object):
+                 client_.set_offline()
+ 
+         LOG.w("Disconnect from", handle)
++        self.conn_info.pop(handle, None)
++        self.sys_gusers.pop(handle, None)
++        self.thumb_errors.pop(handle, None)
+         client = None
+         for client in structs.clients:
+             if client.hsystem == handle:
+@@ -813,12 +1032,12 @@ class EpoptesGui(object):
+         if client.users:
+             for hsession, user in client.users.items():
+                 self.cstore.append(
+-                    [self.calculate_label(client, user[label]),
++                    [self.label_markup(client, user[label], hsession),
+                      self.imagetypes[client.type], client, hsession])
+                 self.ask_thumbshot(hsession, True)
+         else:
+             self.cstore.append(
+-                [self.calculate_label(client),
++                [self.label_markup(client),
+                  self.imagetypes[client.type], client, ''])
+ 
+     def fill_icon_view(self, group, keep_selection=False):
+@@ -923,9 +1142,11 @@ class EpoptesGui(object):
+ 
+         # Update/fill the client information
+         client.type, client.hostname = type_, host
++        self.conn_info[handle] = info
+         if uid == 0:
+             # This is a root epoptes-client
+             client.hsystem = handle
++            self.ask_graphical_users(handle)
+         else:
+             # This is a user epoptes-client
+             client.add_user(user, name, handle)
+@@ -949,7 +1170,702 @@ class EpoptesGui(object):
+             user = row[C_INSTANCE].users[row[C_SESSION_HANDLE]][label]
+         else:
+             user = ''
+-        row[C_LABEL] = self.calculate_label(inst, user)
++        row[C_LABEL] = self.label_markup(inst, user, row[C_SESSION_HANDLE])
++
++    # VoidBR patch: zoom da fonte, como nos voidbr-*-tweaks.
++    def setup_font_zoom(self):
++        """Add the A-/100%/A+ buttons and the Ctrl +/-/0 shortcuts."""
++        self.css_fonte = Gtk.CssProvider()
++        Gtk.StyleContext.add_provider_for_screen(
++            Gdk.Screen.get_default(), self.css_fonte,
++            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
++        try:
++            self.escala_fonte = min(ESCALA_MAX, max(ESCALA_MIN, float(
++                config.settings.get('GUI', 'font_scale', fallback='1.0'))))
++        except ValueError:
++            self.escala_fonte = 1.0
++        toolbar = self.get('tlb_clients_information').get_parent()
++        # Separador invisivel que expande: empurra os botoes para a direita
++        sep = Gtk.SeparatorToolItem(draw=False)
++        sep.set_expand(True)
++        toolbar.insert(sep, -1)
++        caixa = Gtk.Box()
++        caixa.get_style_context().add_class('linked')
++        self.b_menor = Gtk.Button(label='A\u2212',
++                                  tooltip_text='Diminuir a fonte (Ctrl -)')
++        self.b_escala = Gtk.Button(label='100%',
++                                   tooltip_text='Tamanho normal (Ctrl 0)')
++        self.b_maior = Gtk.Button(label='A+',
++                                  tooltip_text='Aumentar a fonte (Ctrl +)')
++        for btn, passo in ((self.b_menor, -1), (self.b_escala, 0),
++                           (self.b_maior, 1)):
++            btn.set_relief(Gtk.ReliefStyle.NONE)
++            btn.set_valign(Gtk.Align.CENTER)
++            btn.connect('clicked', lambda _b, p=passo: self.mudar_fonte(p))
++            caixa.pack_start(btn, False, False, 0)
++        item = Gtk.ToolItem()
++        item.add(caixa)
++        toolbar.insert(item, -1)
++        sep.show()
++        item.show_all()
++        self.mainwin.connect('key-press-event', self.on_font_zoom_key)
++        self.icones_zoom = self.find_zoom_icons()
++        # Imagens de tema (stock/icon_name) de qualquer janela: original de
++        # cada uma, para voltar a 100%; e as janelas ja ajustadas.
++        self.img_tema = {}
++        self.janelas_zoom = set()
++        # A coluna dos grupos tem largura fixa (150 px no .ui); cresce junto
++        self.paned_grupos = self.trv_groups.get_ancestor(Gtk.Paned)
++        self.ajustar_grupos(1.0, self.escala_fonte)
++        # Toda janela que aparece (dialogos, menus, Sobre, diagnostico)
++        # recebe o mesmo zoom, inclusive os atalhos.
++        GObject.add_emission_hook(Gtk.Window, 'map', self.on_window_map)
++        self.aplicar_fonte()
++
++    def ajustar_grupos(self, antiga, nova):
++        """Scale the groups column width, keeping any manual adjustment."""
++        if self.paned_grupos and antiga:
++            self.paned_grupos.set_position(round(
++                self.paned_grupos.get_position() / antiga * nova))
++
++    def find_zoom_icons(self):
++        """Return [(image, svg file, original pixbuf)] for the GtkImages of
++        epoptes.ui that come from image files, so that they follow the zoom.
++        The theme icons of all the windows are handled by zoom_janela()."""
++        icones = []
++        try:
++            objetos = ET.parse('epoptes.ui').iter('object')
++        except (OSError, ET.ParseError) as exc:
++            LOG.e("Can't read epoptes.ui for the icons zoom:", exc)
++            return icones
++        for obj in objetos:
++            if obj.get('class') != 'GtkImage' or not obj.get('id'):
++                continue
++            img = self.get(obj.get('id'))
++            props = {x.get('name'): x.text for x in obj.findall('property')}
++            if img is None or not props.get('pixbuf') or not img.get_pixbuf():
++                continue
++            arq = props['pixbuf']
++            if not arq.endswith('.svg'):
++                svg = os.path.join('images', os.path.splitext(
++                    os.path.basename(arq))[0] + '.svg')
++                if os.path.isfile(svg):
++                    arq = svg
++            icones.append((img, arq, img.get_pixbuf()))
++        return icones
++
++    def aplicar_icones(self, escala):
++        """Resize the icons of all the epoptes windows to follow the zoom."""
++        for img, arq, orig in self.icones_zoom:
++            tam = round(orig.get_width() * escala)
++            if tam == orig.get_width():
++                img.set_from_pixbuf(orig)
++                continue
++            try:
++                img.set_from_pixbuf(
++                    GdkPixbuf.Pixbuf.new_from_file_at_size(arq, tam, tam))
++            except GLib.Error:
++                img.set_from_pixbuf(orig.scale_simple(
++                    tam, tam, GdkPixbuf.InterpType.BILINEAR))
++        for janela in Gtk.Window.list_toplevels():
++            self.zoom_janela(janela, escala)
++
++    def on_window_map(self, widget, *_args):
++        """Emission hook: give the zoom to every epoptes window shown."""
++        if isinstance(widget, Gtk.Window) and widget is not self.mainwin:
++            escala = self.escala_fonte
++            if widget not in self.janelas_zoom:
++                self.janelas_zoom.add(widget)
++                widget.connect('destroy', self.janelas_zoom.discard)
++                if widget.get_window_type() == Gtk.WindowType.TOPLEVEL:
++                    widget.connect('key-press-event', self.on_font_zoom_key)
++                    # O tamanho inicial cresce junto, como o texto
++                    largura, altura = widget.get_default_size()
++                    if escala != 1.0 and largura > 0 and altura > 0:
++                        widget.resize(round(largura * escala),
++                                      round(altura * escala))
++            self.zoom_janela(widget, escala)
++        return True
++
++    def zoom_janela(self, janela, escala):
++        """Resize the theme icons (stock or icon name) of a window."""
++        def percorrer(widget):
++            if isinstance(widget, Gtk.Image):
++                self.zoom_imagem_tema(widget, escala)
++            elif isinstance(widget, Gtk.Container):
++                widget.forall(percorrer)
++        percorrer(janela)
++
++    def zoom_imagem_tema(self, img, escala):
++        """Resize a stock or named icon; keep its original for 100%."""
++        orig = self.img_tema.get(img)
++        if orig is None:
++            tipo = img.get_storage_type()
++            if tipo == Gtk.ImageType.STOCK:
++                orig = ('stock',) + tuple(img.get_stock())
++            elif tipo == Gtk.ImageType.ICON_NAME:
++                orig = ('icon',) + tuple(img.get_icon_name())
++            else:
++                return
++            if escala == 1.0:
++                return
++            self.img_tema[img] = orig
++            img.connect('destroy', lambda w: self.img_tema.pop(w, None))
++        tipo, nome, tamanho = orig
++        if escala == 1.0:
++            img.set_pixel_size(-1)
++            if tipo == 'stock':
++                img.set_from_stock(nome, tamanho)
++            return
++        _ok, largura, _a = Gtk.icon_size_lookup(tamanho)
++        pixels = round(largura * escala)
++        if tipo == 'stock':
++            # O pixel_size nao vale para icone "stock" no GTK3: troca pelo
++            # nome equivalente no tema ou, sem ele, reduz o stock grande.
++            tema = {'gtk-add': 'list-add', 'gtk-remove': 'list-remove',
++                    'gtk-go-up': 'go-up', 'gtk-go-down': 'go-down',
++                    'gtk-zoom-in': 'zoom-in', 'gtk-zoom-out': 'zoom-out',
++                    'gtk-missing-image': 'image-missing',
++                    'gtk-dialog-warning': 'dialog-warning',
++                    'gtk-media-play': 'media-playback-start',
++                    'gtk-network': 'network-workgroup',
++                    'gtk-edit': 'document-edit', 'gtk-execute': 'system-run',
++                    'gtk-go-forward': 'go-next'}.get(nome, nome)
++            if Gtk.IconTheme.get_default().has_icon(tema):
++                img.set_from_icon_name(tema, tamanho)
++            else:
++                grande = img.render_icon_pixbuf(nome, Gtk.IconSize.DIALOG)
++                if grande is not None:
++                    img.set_from_pixbuf(grande.scale_simple(
++                        pixels, pixels, GdkPixbuf.InterpType.BILINEAR))
++                return
++        img.set_pixel_size(pixels)
++
++    def on_font_zoom_key(self, _widget, event):
++        """Handle Ctrl +, Ctrl - and Ctrl 0 in the main window."""
++        if not event.state & Gdk.ModifierType.CONTROL_MASK:
++            return False
++        nome = Gdk.keyval_name(event.keyval)
++        if nome in ('plus', 'equal', 'KP_Add'):
++            self.mudar_fonte(1)
++        elif nome in ('minus', 'KP_Subtract'):
++            self.mudar_fonte(-1)
++        elif nome in ('0', 'KP_0', 'KP_Insert'):
++            self.mudar_fonte(0)
++        else:
++            return False
++        return True
++
++    def aplicar_fonte(self):
++        """Apply self.escala_fonte to all the epoptes windows."""
++        nome = Gtk.Settings.get_default().props.gtk_font_name or ''
++        achou = re.search(r'(\d+(?:\.\d+)?)\s*$', nome)
++        base = float(achou.group(1)) if achou else 11.0
++        escala = self.escala_fonte
++        # "*" e nao "window *": no GTK3 o no CSS dos dialogos e "dialog"
++        # (e "messagedialog"/"aboutdialog"), que "window" nao alcanca.
++        self.css_fonte.load_from_data((
++            '* { font-size: %.1fpt; }\n' % (base * escala)).encode('utf-8'))
++        self.aplicar_icones(escala)
++        for janela in Gtk.Window.list_toplevels():
++            janela.queue_resize()
++        self.b_escala.set_label('%d%%' % round(escala * 100))
++        self.b_menor.set_sensitive(escala > ESCALA_MIN + 0.001)
++        self.b_maior.set_sensitive(escala < ESCALA_MAX - 0.001)
++
++    def mudar_fonte(self, passo):
++        """Change the font scale by passo*10%, or reset it if passo is 0."""
++        nova = 1.0 if passo == 0 else round(self.escala_fonte + 0.1 * passo, 2)
++        nova = min(ESCALA_MAX, max(ESCALA_MIN, nova))
++        if nova == self.escala_fonte and passo:
++            return
++        self.definir_escala(nova)
++
++    def definir_escala(self, nova):
++        """Apply and save a font scale (0.7 to 2.0)."""
++        nova = min(ESCALA_MAX, max(ESCALA_MIN, round(nova, 2)))
++        self.ajustar_grupos(self.escala_fonte, nova)
++        self.escala_fonte = nova
++        self.aplicar_fonte()
++        self.salvar_config('font_scale', nova)
++
++    @staticmethod
++    def salvar_config(chave, valor):
++        """Save a [GUI] setting right away (None removes it)."""
++        settings = config.settings
++        if not settings.has_section('GUI'):
++            settings.add_section('GUI')
++        if valor is None:
++            settings.remove_option('GUI', chave)
++        else:
++            settings.set('GUI', chave, str(valor))
++        config.write_ini_file(config.expand_filename('settings'), settings)
++
++    def gusers_interval(self):
++        """Seconds between the logged in users checks."""
++        return max(5, config.settings.getint(
++            'GUI', 'graphical_users_seconds', fallback=20))
++
++    def on_imi_settings_activate(self, _widget):
++        """Handle imi_settings.activate event: the settings window."""
++        gui = config.settings.getint
++        padrao_ts = int(config.system['THUMBSHOT_MS']) // 1000 or 1
++        dlg = Gtk.Dialog(title='Configura\u00e7\u00f5es do Epoptes',
++                         transient_for=self.mainwin)
++        btn_padrao = dlg.add_button('Restaurar padr\u00f5es', 1)
++        dlg.add_button('Fechar', Gtk.ResponseType.CLOSE)
++        abas = Gtk.Notebook(border_width=6)
++        dlg.get_content_area().pack_start(abas, True, True, 0)
++        widgets = {}
++
++        def aba(titulo):
++            grade = Gtk.Grid(row_spacing=10, column_spacing=12,
++                             border_width=12)
++            abas.append_page(grade, Gtk.Label(label=titulo))
++            return grade
++
++        def numero(grade, linha, texto, chave, valor, minimo, maximo,
++                   dica, passo=1, unidade='s'):
++            rotulo = Gtk.Label(label=texto, xalign=0, hexpand=True,
++                               tooltip_text=dica)
++            ajuste = Gtk.Adjustment(value=valor, lower=minimo, upper=maximo,
++                                    step_increment=passo,
++                                    page_increment=passo * 10)
++            spin = Gtk.SpinButton(adjustment=ajuste, numeric=True,
++                                  tooltip_text=dica)
++            grade.attach(rotulo, 0, linha, 1, 1)
++            grade.attach(spin, 1, linha, 1, 1)
++            grade.attach(Gtk.Label(label=unidade, xalign=0), 2, linha, 1, 1)
++            widgets[chave] = spin
++            return spin
++
++        def opcao(grade, linha, texto, chave, valor, dica):
++            check = Gtk.CheckButton(label=texto, active=valor,
++                                    tooltip_text=dica)
++            grade.attach(check, 0, linha, 3, 1)
++            widgets[chave] = check
++            return check
++
++        # Miniaturas
++        grade = aba('Miniaturas')
++        numero(grade, 0, 'Clientes GNOME com Wayland', 'thumbshots_gnome_seconds',
++               gui('GUI', 'thumbshots_gnome_seconds', fallback=60), 5, 3600,
++               'No GNOME cada miniatura pisca a tela e toca o som de '
++               'c\u00e2mera no aluno (\u00e9 do pr\u00f3prio GNOME). Padr\u00e3o: 60 s.')
++        numero(grade, 1, 'Demais clientes', 'thumbshots_seconds',
++               gui('GUI', 'thumbshots_seconds', fallback=padrao_ts), 1, 600,
++               'X11, Hyprland, Sway e outros. Padr\u00e3o: %d s (o valor do '
++               'sistema, em /etc/default/epoptes).' % padrao_ts)
++        grade.attach(Gtk.Label(
++            label='<small>Tempo entre uma miniatura e a pr\u00f3xima de cada '
++                  'm\u00e1quina.</small>', use_markup=True, xalign=0),
++            0, 2, 3, 1)
++
++        # Auxiliar e mensagens
++        grade = aba('Auxiliar e mensagens')
++        opcao(grade, 0, 'Prender o teclado e o mouse do aluno no Auxiliar '
++              'usu\u00e1rio', 'grabkbdptr',
++              config.settings.getboolean('GUI', 'grabkbdptr', fallback=False),
++              'Enquanto o professor auxilia, o aluno n\u00e3o usa o '
++              'pr\u00f3prio teclado e mouse.')
++        grade.attach(Gtk.Label(label='T\u00edtulo padr\u00e3o das mensagens',
++                               xalign=0), 0, 1, 1, 1)
++        titulo = Gtk.Entry(hexpand=True, text=config.settings.get(
++            'GUI', 'messages_default_title', fallback=''))
++        grade.attach(titulo, 1, 1, 2, 1)
++        widgets['messages_default_title'] = titulo
++        opcao(grade, 2, 'Usar formata\u00e7\u00e3o (markup do Pango) nas mensagens',
++              'messages_use_markup',
++              config.settings.getboolean('GUI', 'messages_use_markup',
++                                         fallback=False),
++              'Permite <b>negrito</b>, <i>it\u00e1lico</i> e cores no texto.')
++
++        # Aparencia
++        grade = aba('Apar\u00eancia')
++        numero(grade, 0, 'Tamanho da fonte e dos \u00edcones', 'font_scale',
++               round(self.escala_fonte * 100), ESCALA_MIN * 100,
++               ESCALA_MAX * 100, 'O mesmo dos bot\u00f5es A\u2212 / A+ '
++               '(Ctrl +, Ctrl \u2212, Ctrl 0).', passo=10, unidade='%')
++        opcao(grade, 1, 'Mostrar o nome real dos usu\u00e1rios nas etiquetas',
++              'show_real_names', self.show_real_names,
++              'O mesmo do menu Etiquetas.')
++
++        # Avancado
++        grade = aba('Avan\u00e7ado')
++        numero(grade, 0, 'Conferir os usu\u00e1rios logados a cada',
++               'graphical_users_seconds', self.gusers_interval(), 5, 600,
++               '\u00c9 o que mostra o selo "Sess\u00e3o n\u00e3o conectou". '
++               'Padr\u00e3o: 20 s.')
++
++        def aplicar(_widget, chave):
++            w = widgets[chave]
++            if chave == 'font_scale':
++                self.definir_escala(w.get_value_as_int() / 100)
++            elif chave == 'show_real_names':
++                self.get('cmi_show_real_names').set_active(w.get_active())
++                self.salvar_config(chave, w.get_active())
++            elif isinstance(w, Gtk.SpinButton):
++                self.salvar_config(chave, w.get_value_as_int())
++                if chave == 'graphical_users_seconds':
++                    GLib.source_remove(self.gusers_timer)
++                    self.gusers_timer = GLib.timeout_add_seconds(
++                        self.gusers_interval(), self.poll_graphical_users)
++            elif isinstance(w, Gtk.CheckButton):
++                self.salvar_config(chave, w.get_active())
++            else:
++                self.salvar_config(chave, w.get_text())
++
++        for chave, w in widgets.items():
++            if isinstance(w, Gtk.SpinButton):
++                w.connect('value-changed', aplicar, chave)
++            elif isinstance(w, Gtk.CheckButton):
++                w.connect('toggled', aplicar, chave)
++            else:
++                w.connect('changed', aplicar, chave)
++
++        def resposta(_dlg, codigo):
++            if codigo != 1:
++                dlg.destroy()
++                return
++            padroes = {'thumbshots_gnome_seconds': 60,
++                       'thumbshots_seconds': padrao_ts,
++                       'grabkbdptr': False, 'messages_use_markup': False,
++                       'messages_default_title': config.settings.get(
++                           'GUI', 'messages_default_title', fallback=''),
++                       'font_scale': 100, 'show_real_names': False,
++                       'graphical_users_seconds': 20}
++            for chave, valor in padroes.items():
++                w = widgets[chave]
++                if isinstance(w, Gtk.SpinButton):
++                    w.set_value(valor)
++                elif isinstance(w, Gtk.CheckButton):
++                    w.set_active(valor)
++            # Quem segue o padrao do sistema nao fica gravado
++            self.salvar_config('thumbshots_seconds', None)
++
++        btn_padrao.set_tooltip_text(
++            'Volta todos os valores ao padr\u00e3o (menos o t\u00edtulo das '
++            'mensagens).')
++        dlg.connect('response', resposta)
++        dlg.show_all()
++
++    # VoidBR patch: selos de estado, dica e "Diagnosticar cliente".
++    @staticmethod
++    def session_desc(info):
++        """Return e.g. "Wayland - Hyprland" from the info of a connection."""
++        session = {'wayland': 'Wayland', 'x11': 'X11'}.get(
++            info.get('session', ''), '')
++        # XDG_CURRENT_DESKTOP pode ser uma lista, como "ubuntu:GNOME"
++        desktop = info.get('desktop', '').split(':')[-1]
++        return ' \u00b7 '.join([x for x in (session, desktop) if x])
++
++    def client_state(self, client, hsession=''):
++        """Return (level, text, hint) for an iconview entry.
++        level is 'warn' for a problem, 'info' otherwise."""
++        if hsession:
++            uname = client.users.get(hsession, {}).get('uname', '')
++            dups = len([1 for u in client.users.values()
++                        if u['uname'] == uname])
++            if dups > 1:
++                return ('warn', 'Sess\u00e3o duplicada \u00d7%d' % dups,
++                        'H\u00e1 %d conex\u00f5es de sess\u00e3o de %s. Mantenha '
++                        'a mais antiga e encerre as outras em Reconectar '
++                        'sess\u00e3o.' % (dups, uname))
++            if hsession in self.thumb_errors:
++                return ('warn', 'Miniatura falhou',
++                        'Motivo no cliente: %s' % self.thumb_errors[hsession])
++            if not client.hsystem:
++                return ('warn', 'Sem conex\u00e3o do root',
++                        'O servi\u00e7o epoptes-client da m\u00e1quina '
++                        'n\u00e3o est\u00e1 conectado: desligar, reiniciar e '
++                        'o terminal de root n\u00e3o funcionam. Use '
++                        'Diagnosticar cliente.')
++            return ('info', self.session_desc(
++                self.conn_info.get(hsession, {})), '')
++        if not client.hsystem:
++            return ('info', '', '')
++        connected = set(u['uname'] for u in client.users.values())
++        missing = [u for u in self.sys_gusers.get(client.hsystem, [])
++                   if u not in connected]
++        if missing:
++            return ('warn', 'Sess\u00e3o n\u00e3o conectou (%s)'
++                    % ', '.join(missing),
++                    'O usu\u00e1rio entrou, mas a conex\u00e3o da sess\u00e3o '
++                    'n\u00e3o veio: grupo epoptes, autostart ou certificado. '
++                    'Use Diagnosticar cliente.')
++        return ('info', 'Sem usu\u00e1rio logado', '')
++
++    def row_name(self, row):
++        """Return e.g. "lab-05 (maria)" for an iconview entry."""
++        client, hsession = row[C_INSTANCE], row[C_SESSION_HANDLE]
++        user = client.users.get(hsession, {}).get('uname', '') \
++            if hsession else ''
++        return client.get_name() + (' (%s)' % user if user else '')
++
++    def observe_unsupported(self, row):
++        """Return why Observe/Assist can't work on an entry, or ''."""
++        hsession = row[C_SESSION_HANDLE]
++        if not hsession:
++            return ''
++        info = self.conn_info.get(hsession, {})
++        session = info.get('session', '')
++        desktop = info.get('desktop', '').upper()
++        # Sem o campo vnc= (servidor antigo), nao da para saber
++        vnc = info.get('vnc')
++        vnc = vnc.split(',') if vnc is not None else None
++        if session == 'wayland':
++            if 'KDE' in desktop or 'PLASMA' in desktop:
++                return ('KDE no Wayland ainda n\u00e3o tem servidor VNC '
++                        'compat\u00edvel (o wayvnc funciona em Hyprland, '
++                        'Sway e outros wlroots; o GNOME usa o pr\u00f3prio)')
++            if 'GNOME' in desktop:
++                if vnc is not None and 'grd' not in vnc:
++                    return ('falta o pacote gnome-remote-desktop no cliente '
++                            '(o servidor VNC do pr\u00f3prio GNOME) ou o '
++                            'secret-tool (pacote libsecret)')
++                return ''
++            if vnc is not None and 'wayvnc' not in vnc:
++                return 'falta o pacote wayvnc no cliente'
++        elif session == 'x11' and vnc is not None and 'x11vnc' not in vnc:
++            return 'falta o pacote x11vnc no cliente'
++        return ''
++
++    def session_position(self, client, hsession):
++        """Return (position, total) of a session among the user's sessions,
++        in connection order (the oldest first)."""
++        uname = client.users.get(hsession, {}).get('uname', '')
++        same = [h for h, u in client.users.items() if u['uname'] == uname]
++        return same.index(hsession) + 1, len(same)
++
++    def label_markup(self, client, username='', hsession=''):
++        """Return the iconview label, with the state badge below it."""
++        markup = GLib.markup_escape_text(
++            self.calculate_label(client, username))
++        level, text, _hint = self.client_state(client, hsession)
++        if text:
++            if level == 'warn':
++                markup += '\n<span size="small" foreground="#d9480f">' \
++                          '\u26a0 %s</span>' % GLib.markup_escape_text(text)
++            else:
++                markup += '\n<span size="small" foreground="#808080">' \
++                          '%s</span>' % GLib.markup_escape_text(text)
++        return markup
++
++    def refresh_labels(self):
++        """Recalculate the labels and badges of all the iconview entries."""
++        for row in self.cstore:
++            self.set_label(row)
++
++    def tooltip_markup(self, client, hsession=''):
++        """Return the tooltip markup for an iconview entry."""
++        esc = GLib.markup_escape_text
++        sysinfo = self.conn_info.get(client.hsystem, {})
++        uinfo = self.conn_info.get(hsession, {}) if hsession else {}
++        info = uinfo or sysinfo
++        lines = ['<b>%s</b>' % esc(client.get_name())]
++        details = []
++        if info.get('ip'):
++            details.append('IP ' + info['ip'])
++        if client.mac:
++            details.append('MAC ' + client.mac)
++        if details:
++            lines.append(esc(' \u00b7 '.join(details)))
++        if info.get('version'):
++            lines.append(esc('Cliente epoptes %s' % info['version']))
++        lines.append('Conex\u00e3o do root: ' + (
++            'conectada' if client.hsystem else 'ausente'))
++        if hsession:
++            uname = client.users.get(hsession, {}).get('uname', '')
++            desc = self.session_desc(uinfo)
++            lines.append(esc('Sess\u00e3o: %s%s' % (
++                uname, ' (%s)' % desc if desc else '')))
++            pos, total = self.session_position(client, hsession)
++            if total > 1:
++                lines.append(esc('Conex\u00e3o %d de %d (%s)' % (
++                    pos, total, 'a mais antiga, mantenha esta' if pos == 1
++                    else 'pode encerrar em Reconectar sess\u00e3o')))
++            reason = self.observe_unsupported(
++                {C_INSTANCE: client, C_SESSION_HANDLE: hsession})
++            if reason:
++                lines.append(esc('Observar/Assistir: ' + reason))
++        elif client.hsystem:
++            lines.append('Sess\u00e3o: nenhuma conectada')
++            gusers = self.sys_gusers.get(client.hsystem, [])
++            if gusers:
++                lines.append(esc('Usu\u00e1rios logados: ' + ', '.join(gusers)))
++        level, text, hint = self.client_state(client, hsession)
++        if level == 'warn':
++            lines.append('<span foreground="#d9480f"><b>\u26a0 %s</b></span>'
++                         % esc(text))
++            if hint:
++                lines.append(esc(hint))
++        return '\n'.join(lines)
++
++    def on_icv_clients_query_tooltip(self, widget, x, y, keyboard_mode,
++                                     tooltip):
++        """Handle icv_clients.query-tooltip event."""
++        ctx = widget.get_tooltip_context(x, y, keyboard_mode)
++        if not ctx[0]:
++            return False
++        model, path = ctx[3], ctx[4]
++        row = model[path]
++        tooltip.set_markup(self.tooltip_markup(
++            row[C_INSTANCE], row[C_SESSION_HANDLE]))
++        widget.set_tooltip_item(tooltip, path)
++        return True
++
++    def poll_graphical_users(self):
++        """Ask the root connections for the logged in users, periodically."""
++        if self.daemon:
++            for client in structs.clients:
++                if client.hsystem:
++                    self.ask_graphical_users(client.hsystem)
++        return True
++
++    def ask_graphical_users(self, handle):
++        """Ask a root connection which users have a graphical session."""
++        dfr = self.daemon_command(handle, 'graphical_users')
++        dfr.addCallback(
++            lambda r, h=handle: self.got_graphical_users(h, r.decode()))
++        dfr.addErrback(lambda err, h=handle: LOG.d(
++            "graphical_users failed on %s: %s" % (h, err)))
++
++    def got_graphical_users(self, handle, reply):
++        """Callback after running `graphical_users` on a client."""
++        users = [u for u in reply.strip().split(',')
++                 if re.match(r'^[A-Za-z0-9_][A-Za-z0-9_.-]*\$?$', u)]
++        if self.sys_gusers.get(handle) != users:
++            self.sys_gusers[handle] = users
++            self.refresh_labels()
++
++    def on_imi_clients_reconnect_activate(self, _widget):
++        """Handle imi_clients_reconnect.activate event."""
++        rows = self.get_selected_clients()
++        if len(rows) != 1 or not rows[0][C_SESSION_HANDLE]:
++            return
++        client, hsession = rows[0][C_INSTANCE], rows[0][C_SESSION_HANDLE]
++        name = self.row_name(rows[0])
++        pos, total = self.session_position(client, hsession)
++        if total > 1:
++            if pos == 1:
++                text = ('Esta \u00e9 a conex\u00e3o mais antiga de %s, a que '
++                        'deve ficar. Encerrar mesmo assim, sem abrir outra?'
++                        % name)
++            else:
++                text = ('Encerrar esta conex\u00e3o duplicada de %s (%d de '
++                        '%d), sem abrir outra?' % (name, pos, total))
++            command = 'reconnect drop'
++        else:
++            text = ('Reconectar a sess\u00e3o de %s? A m\u00e1quina some da '
++                    'lista por alguns segundos e volta.' % name)
++            command = 'reconnect'
++        if not self.confirmation_dialog(text):
++            return
++        # O shell do cliente morre sem responder; o erro da conexao fechada
++        # nao interessa.
++        self.daemon_command(hsession, command).addErrback(lambda err: None)
++
++    def on_imi_clients_diagnose_activate(self, _widget):
++        """Handle imi_clients_diagnose.activate event."""
++        rows = self.get_selected_clients()
++        if len(rows) != 1:
++            return
++        client, hsession = rows[0][C_INSTANCE], rows[0][C_SESSION_HANDLE]
++        # A conexao da sessao testa tambem a miniatura; sem ela, a do root
++        handle = hsession or client.hsystem
++        if not handle:
++            self.warning_dialog(
++                'A m\u00e1quina %s est\u00e1 desligada ou sem conex\u00e3o '
++                'com o servidor.' % client.get_name())
++            return
++        if hsession:
++            who = client.users.get(hsession, {}).get('uname', '')
++        else:
++            who = 'root'
++        self.diagnose_dialog(handle, '%s (%s)' % (client.get_name(), who))
++
++    def diagnose_dialog(self, handle, name):
++        """Show the epoptes-client --check output of a client."""
++        dlg = Gtk.Dialog(title='Diagn\u00f3stico \u2014 ' + name,
++                         transient_for=self.mainwin)
++        dlg.set_default_size(760, 440)
++        btn_again = dlg.add_button('Rodar de novo', 1)
++        dlg.add_button('Copiar', 2)
++        dlg.add_button('Fechar', Gtk.ResponseType.CLOSE)
++        buf = Gtk.TextBuffer()
++        for tag, props in (
++                ('ok', {'foreground': '#2b8a3e', 'weight': 700}),
++                ('fail', {'foreground': '#c92a2a', 'weight': 700}),
++                ('info', {'foreground': '#1c7ed6', 'weight': 700}),
++                ('hint', {'foreground': '#b35c00'}),
++                ('bold', {'weight': 700}),
++                ('dim', {'foreground': '#808080'})):
++            buf.create_tag(tag, **props)
++        view = Gtk.TextView(buffer=buf, editable=False, cursor_visible=False,
++                            monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR,
++                            left_margin=8, top_margin=8)
++        scw = Gtk.ScrolledWindow()
++        scw.add(view)
++        dlg.get_content_area().pack_start(scw, True, True, 0)
++        state = {'alive': True}
++
++        def fill(text):
++            if not state['alive']:
++                return
++            btn_again.set_sensitive(True)
++            buf.set_text('')
++            text = re.sub(r'\x1b\[[0-9;]*m', '', text).rstrip('\n')
++            for i, line in enumerate(text.split('\n')):
++                end = buf.get_end_iter()
++                if i:
++                    buf.insert(end, '\n')
++                    end = buf.get_end_iter()
++                match = re.match(r'^(\s*)(\[OK\]|\[FALHA\]|\[INFO\])(.*)$',
++                                 line)
++                if match:
++                    buf.insert(end, match.group(1))
++                    buf.insert_with_tags_by_name(
++                        buf.get_end_iter(), match.group(2),
++                        {'[OK]': 'ok', '[FALHA]': 'fail',
++                         '[INFO]': 'info'}[match.group(2)])
++                    buf.insert(buf.get_end_iter(), match.group(3))
++                elif line.lstrip().startswith('->'):
++                    buf.insert_with_tags_by_name(end, line, 'hint')
++                elif i == 0 or line.startswith('Tudo certo'):
++                    buf.insert_with_tags_by_name(
++                        end, line, 'ok' if line.startswith('Tudo') else 'bold')
++                elif 'problema(s) encontrado(s)' in line:
++                    buf.insert_with_tags_by_name(end, line, 'fail')
++                else:
++                    buf.insert(end, line)
++
++        def start():
++            btn_again.set_sensitive(False)
++            buf.set_text('')
++            buf.insert_with_tags_by_name(
++                buf.get_end_iter(),
++                'Rodando epoptes-client --check em %s...' % name, 'dim')
++            dfr = self.daemon_command(handle, 'diagnose')
++            dfr.addCallback(lambda r: fill(r.decode('utf-8', 'replace')))
++            dfr.addErrback(lambda err: fill(
++                '  [FALHA] sem resposta do cliente: %s'
++                % err.getErrorMessage()))
++
++        def on_response(_dlg, response):
++            if response == 1:
++                start()
++            elif response == 2:
++                Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(
++                    buf.get_text(buf.get_start_iter(), buf.get_end_iter(),
++                                 False), -1)
++            else:
++                state['alive'] = False
++                dlg.destroy()
++
++        dlg.connect('response', on_response)
++        dlg.connect('delete-event', lambda *_a: state.update(alive=False))
++        dlg.show_all()
++        start()
+ 
+     def calculate_label(self, client, username=''):
+         """Return the iconview label from a hostname/alias and a username,
+@@ -1000,6 +1916,21 @@ class EpoptesGui(object):
+             del self.current_thumbshots[handle]
+         return False
+ 
++    def thumbshot_interval(self, handle):
++        """Return the msec to wait before asking a new thumbshot."""
++        # VoidBR patch: no GNOME com Wayland a miniatura vem do portal de
++        # captura, que pisca a tela e toca o som de camera a cada captura
++        # (e do proprio GNOME, nao da para desligar). La, so a cada
++        # thumbshots_gnome_seconds (padrao 60 s), da secao [GUI] do settings.
++        info = self.conn_info.get(handle, {})
++        if info.get('session') == 'wayland' and \
++                'GNOME' in info.get('desktop', '').upper().split(':'):
++            return 1000 * max(5, config.settings.getint(
++                'GUI', 'thumbshots_gnome_seconds', fallback=60))
++        return 1000 * max(1, config.settings.getint(
++            'GUI', 'thumbshots_seconds',
++            fallback=int(config.system['THUMBSHOT_MS']) // 1000 or 1))
++
+     def got_thumbshot(self, handle, reply):
+         """Callback after running`thumbshot` on a client."""
+         for i in self.cstore:
+@@ -1007,11 +1938,21 @@ class EpoptesGui(object):
+                 # Ask for a new thumbshot THUMBSHOT_MS msec after the last one.
+                 # So if the client is too stressed and needs e.g. 7 secs to
+                 # send a thumbshot, we'll ask for one every 12 secs.
+-                GLib.timeout_add(int(config.system['THUMBSHOT_MS']),
++                GLib.timeout_add(self.thumbshot_interval(handle),
+                                  self.ask_thumbshot, handle)
+                 LOG.d("I got a thumbshot from %s." % handle)
+                 if not reply:
+                     return
++                # VoidBR patch: a captura falhou no cliente, guarda o motivo
++                if b'VBR_THUMBSHOT_ERROR=' in reply:
++                    msg = reply.split(b'VBR_THUMBSHOT_ERROR=', 1)[1].decode(
++                        'utf-8', 'replace').strip().split('\n')[0]
++                    if self.thumb_errors.get(handle) != msg:
++                        self.thumb_errors[handle] = msg
++                        self.set_label(i)
++                    return
++                if self.thumb_errors.pop(handle, None) is not None:
++                    self.set_label(i)
+                 try:
+                     rowstride, size, pixels = reply.split(b'\n', 2)
+                     rowstride = int(rowstride)
+@@ -1059,7 +2000,7 @@ class EpoptesGui(object):
+         # ${GUI_PY} must be unquoted, don't pass it as list
+         if isinstance(command, list) and len(command) > 0:
+             command = '%s %s' % (command[0], ' '.join(
+-                [pipes.quote(str(x)) for x in command[1:]]))
++                [shlex.quote(str(x)) for x in command[1:]]))
+ 
+         if (clients != [] or handles != []) and warning != '':
+             if not self.confirmation_dialog(warning):
+diff --git a/usr/sbin/epoptes-client b/usr/sbin/epoptes-client
+index 7a2ee2a..a014d6d 100755
+--- a/usr/sbin/epoptes-client
++++ b/usr/sbin/epoptes-client
+@@ -9,8 +9,10 @@
+ 
+ usage() {
+     cat <<EOF
+-Usage: $0 [-c|-h|-v] [SERVER] [PORT]
++Usage: $0 [-c|-h|-v|--check] [SERVER] [PORT]
+ Connect to a remote server and offer it a local shell.
++  --check   diagnostico: arquivos, nome do servidor, certificado, conexoes
++            e miniatura (rode como usuario, na sessao grafica)
+ EOF
+ }
+ 
+@@ -126,11 +128,17 @@ wait_for_dns() {
+     while true; do
+         server_ip=$(getent hosts "$SERVER" | awk '{ print $1; exit }')
+         test -n "$server_ip" && break
+-        # If DNS is up and SERVER is not an MDNS name, abort
+-        if [ "${SERVER%.local}" = "${SERVER}" ] &&
++        # VoidBR patch: nao desiste mais. Com VPN (Tailscale/WireGuard), no
++        # boot e no login a internet resolve nomes antes de a VPN subir, e o
++        # nome do servidor so resolve depois. Abortar aqui matava de vez a
++        # conexao da sessao do usuario (o autostart nao reinicia) e, no
++        # systemd, tambem a do root (RemainAfterExit, sem Restart).
++        # Agora avisa uma vez e continua tentando.
++        if [ "${SERVER%.local}" = "${SERVER}" ] && [ -z "$warned_dns" ] &&
+             [ -n "$(getent hosts "ntp.org" | awk '{ print $1; exit }')" ]; then
+-            echo "Cannot resolve $SERVER while DNS appears to work, aborting."
+-            exit 1
++            warned_dns=1
++            echo "Cannot resolve $SERVER while DNS appears to work, will keep retrying." \
++                "Check SERVER in /etc/default/epoptes-client or /etc/hosts."
+         fi
+         if [ "$delay" -eq 5 ]; then
+             echo "Cannot resolve $SERVER, will keep retrying."
+@@ -164,6 +172,237 @@ EOF
+     fi
+ }
+ 
++# VoidBR patch: impressao digital (sha256) do certificado que o servidor
++# apresenta agora; vazio se nao conectou. Usa timeout para nao travar quando
++# o servidor (ou a VPN) ainda nao esta de pe.
++server_fingerprint() {
++    timeout 5 openssl s_client -connect "$SERVER:$PORT" </dev/null 2>/dev/null |
++        sed '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/!d' |
++        openssl x509 -noout -fingerprint -sha256 2>/dev/null
++}
++
++local_fingerprint() {
++    openssl x509 -noout -fingerprint -sha256 -in "$servercrt" 2>/dev/null
++}
++
++# VoidBR patch: quando o servidor e reinstalado ele gera um certificado novo,
++# e o cliente com o antigo so falha no TLS, em silencio, para sempre. Avisa
++# no log (svlogd/journal do root, ~/.xsession-errors da sessao) como resolver.
++check_certificate() {
++    local remote
++
++    remote=$(server_fingerprint)
++    test -n "$remote" || return 0
++    if [ "$remote" != "$(local_fingerprint)" ]; then
++        echo "epoptes-client WARNING: the certificate of $SERVER:$PORT changed" \
++            "(server reinstalled?). Run as root: epoptes-client -c," \
++            "then restart the epoptes-client service and the session." >&2
++    fi
++}
++
++# Cores so quando a saida e um terminal (em pipe/arquivo, texto puro).
++check_colors() {
++    if [ -t 1 ]; then
++        red=$(printf '\033[1;31m')
++        green=$(printf '\033[1;32m')
++        yellow=$(printf '\033[1;33m')
++        blue=$(printf '\033[1;34m')
++        bold=$(printf '\033[1m')
++        reset=$(printf '\033[0m')
++    else
++        red= green= yellow= blue= bold= reset=
++    fi
++}
++
++check_ok() {
++    echo "  ${green}[OK]${reset}    $*"
++}
++
++check_info() {
++    echo "  ${blue}[INFO]${reset}  $*"
++}
++
++check_fail() {
++    echo "  ${red}[FALHA]${reset} $1"
++    test -n "$2" && echo "          ${yellow}-> $2${reset}"
++    check_failures=$((check_failures + 1))
++}
++
++# Estado do servico do root no runit: "run", "down", "finish" ou vazio. O
++# sv status precisa de root (supervise/ok); como usuario, deduz pelos
++# processos: o runsv do servico e o socat do root.
++runit_service_state() {
++    local st
++
++    st=$(sv status /etc/sv/epoptes-client 2>/dev/null)
++    case "$st" in
++    run:* | down:* | finish:*)
++        echo "$st" | sed 's/^\([a-z]*\): [^:]*: \([^;]*\).*/\1 \2/'
++        return
++        ;;
++    esac
++    if ! ps -C runsv -o args= | grep -qx 'runsv epoptes-client'; then
++        echo "nosupervise"
++    elif ps -C socat -o user= | grep -qx root; then
++        echo "run (deduzido pelos processos; use sudo para o estado exato)"
++    else
++        echo "down (deduzido pelos processos; use sudo para o estado exato)"
++    fi
++}
++
++# VoidBR patch: epoptes-client --check, diagnostico em uma saida so.
++run_check() {
++    local dir missing f remote conns err me procs summary mypids mycount state
++
++    check_failures=0
++    dir=/usr/share/epoptes-client
++    check_colors
++    echo "${bold}Diagnostico do epoptes-client${reset} (servidor $SERVER:$PORT, uid $UID)"
++
++    missing=
++    for f in _common.py endsession get-display lock.svg lock_screen.py \
++        message.py receive-terminals remote_assistance.py \
++        remote_assistance.ui share-terminal thumbshot.py; do
++        test -e "$dir/$f" || missing="$missing $f"
++    done
++    if [ -z "$missing" ]; then
++        check_ok "arquivos de $dir completos"
++    else
++        check_fail "faltam arquivos em $dir:$missing" \
++            "reinstale o pacote do cliente (xbps-install -f / pacman -S)"
++    fi
++
++    # O processo do root vem do servico. Ele pode estar rodando desde o boot
++    # e mesmo assim estar desabilitado - ai nao volta no proximo boot.
++    if [ -d /run/systemd/system ]; then
++        if systemctl is-enabled --quiet epoptes-client 2>/dev/null; then
++            check_ok "servico epoptes-client habilitado no boot (systemd)"
++        else
++            check_fail "servico epoptes-client nao esta habilitado no boot" \
++                "sudo systemctl enable --now epoptes-client"
++        fi
++        state=$(systemctl is-active epoptes-client 2>/dev/null)
++        if [ "$state" = active ]; then
++            check_ok "servico epoptes-client rodando (systemd: active)"
++        else
++            check_fail "servico epoptes-client nao esta rodando (systemd: ${state:-?})" \
++                "sudo systemctl start epoptes-client"
++        fi
++    elif [ -d /etc/runit/runsvdir ]; then
++        if [ -e /etc/runit/runsvdir/current/epoptes-client ]; then
++            check_ok "servico epoptes-client habilitado no boot (runit)"
++        else
++            check_fail "servico epoptes-client nao esta habilitado no boot" \
++                "sudo ln -s /etc/sv/epoptes-client /var/service/"
++        fi
++        state=$(runit_service_state)
++        case "$state" in
++        run*)
++            check_ok "servico epoptes-client rodando (runit: $state)"
++            ;;
++        down*)
++            check_fail "servico epoptes-client parado (runit: $state)" \
++                "sudo sv up epoptes-client"
++            ;;
++        finish*)
++            check_fail "servico epoptes-client encerrando/reiniciando (runit: $state)" \
++                "aguarde alguns segundos e rode o --check de novo"
++            ;;
++        *)
++            check_fail "servico epoptes-client sem supervisao do runit (nenhum runsv)" \
++                "habilite o servico; se ja esta habilitado, aguarde 5 s ou reinicie"
++            ;;
++        esac
++    fi
++
++    if [ -z "$(echo "$SERVER" | tr -d '0-9.')" ] ||
++        getent hosts "$SERVER" >/dev/null; then
++        check_ok "o nome $SERVER resolve: $(getent hosts "$SERVER" | awk '{ print $1; exit }')"
++    else
++        check_fail "o nome $SERVER nao resolve" \
++            "ajuste SERVER= em /etc/default/epoptes-client ou o /etc/hosts"
++    fi
++
++    if [ -s "$servercrt" ]; then
++        check_ok "certificado local em $servercrt"
++    else
++        check_fail "nao existe $servercrt" "rode como root: epoptes-client -c"
++    fi
++
++    remote=$(server_fingerprint)
++    if [ -z "$remote" ]; then
++        check_fail "nao conectou em $SERVER:$PORT" \
++            "servidor desligado, servico epoptes parado, firewall ou rede/VPN"
++    elif [ "$remote" != "$(local_fingerprint)" ]; then
++        check_fail "o certificado do servidor e diferente do local" \
++            "rode como root: epoptes-client -c, e reinicie o servico e a sessao"
++    else
++        check_ok "o servidor responde e o certificado confere"
++    fi
++
++    # Cada conexao do epoptes-client e um processo socat. Ele existe mesmo
++    # enquanto ainda tenta conectar (tenta de novo a cada 60 s), por isso
++    # conta os processos, e nao so as conexoes ja estabelecidas.
++    me=$(id -un)
++    procs=$(ps --sort=start_time -C socat -o user:32=,pid=,args= |
++        grep "openssl-connect:$SERVER:$PORT")
++    summary=$(echo "$procs" | awk 'NF { c[$1]++ }
++        END { for (u in c) printf "%s(%d) ", u, c[u] }')
++    conns=$(ss -Htn state established "( dport = :$PORT )" 2>/dev/null | wc -l)
++    check_info "processos por usuario: ${summary:-nenhum}; conexoes estabelecidas: $conns"
++    # Do mais antigo para o mais novo (--sort=start_time); o primeiro e o que
++    # fica - normalmente o do login, que sobe antes de qualquer um aberto a
++    # mao. (Nao da para usar o terminal para separar: no Void os processos da
++    # sessao grafica herdam o tty do Xorg, como o tty8.)
++    mypids=$(echo "$procs" | awk -v u="$me" '$1 == u { print $2 }')
++    mycount=$(echo "$mypids" | grep -c .)
++    if [ "$mycount" -eq 0 ]; then
++        if [ "$UID" -eq 0 ]; then
++            check_fail "nenhum processo epoptes-client do root" \
++                "reinicie o servico epoptes-client"
++        else
++            check_fail "nenhum processo epoptes-client da sua sessao ($me)" \
++                "encerre a sessao e entre de novo, ou rode: setsid -f epoptes-client"
++        fi
++    elif [ "$mycount" -gt 1 ]; then
++        # Encerra o shell filho de cada socat extra com KILL: com kill comum
++        # (TERM), ou matando o proprio socat, o shell se reinicia sozinho
++        # (trap 0 15 no client-functions); e o QUIT e ignorado pelos que
++        # nasceram desse reinicio, que roda em segundo plano.
++        check_fail "$mycount processos epoptes-client de $me (duplicados)" \
++            "mantenha o PID $(echo "$mypids" | head -n 1) e encerre os outros: $(echo "$mypids" | tail -n +2 | sed 's/^/pkill -KILL -P /' | paste -sd ';' | sed 's/;/; /g')"
++    else
++        # ss -p so mostra o PID dos proprios processos, o que basta aqui.
++        if ss -Htnp state established "( dport = :$PORT )" 2>/dev/null |
++            grep -q "pid=$mypids,"; then
++            check_ok "a conexao de $me esta estabelecida (PID $mypids)"
++        else
++            check_fail "o processo de $me (PID $mypids) ainda nao conectou" \
++                "ele tenta de novo a cada 60 s; aguarde e rode o --check de novo"
++        fi
++    fi
++
++    if [ "$UID" -eq 0 ]; then
++        check_info "rode tambem como usuario, na sessao grafica, para testar a miniatura"
++    elif [ -n "$WAYLAND_DISPLAY" ] || [ -n "$DISPLAY" ]; then
++        if err=$(cd "$dir" && ./thumbshot.py 16 12 2>&1 >/dev/null); then
++            check_ok "miniatura (thumbshot) funciona nesta sessao"
++        else
++            check_fail "miniatura (thumbshot) falhou" \
++                "$(echo "$err" | tail -n 1)"
++        fi
++    else
++        check_info "sem sessao grafica (DISPLAY/WAYLAND_DISPLAY): miniatura nao testada"
++    fi
++
++    if [ "$check_failures" -eq 0 ]; then
++        echo "${green}${bold}Tudo certo.${reset}"
++    else
++        echo "${red}${bold}$check_failures problema(s) encontrado(s).${reset}"
++    fi
++    exit "$check_failures"
++}
++
+ # Main.
+ version
+ 
+@@ -185,6 +424,10 @@ case "$1" in
+     need_certificate=true
+     shift
+     ;;
++--check)
++    need_check=true
++    shift
++    ;;
+ esac
+ 
+ # Set a reasonable PATH to execute commands or to relaunch epoptes-client.
+@@ -209,6 +452,8 @@ export "PORT=${2:-$PORT}"
+ test -n "$need_certificate" && fetch_certificate
+ 
+ servercrt=/etc/epoptes/server.crt
++# VoidBR patch: diagnostico (sai com o numero de problemas encontrados)
++test -n "$need_check" && run_check
+ # Don't launch as root on epoptes servers, unless there's a main server
+ if [ "$UID" -eq 0 ] && [ $TYPE = "standalone" ] && [ -x /usr/bin/epoptes ]; then
+     if [ -s /etc/epoptes/main-server.crt ]; then
+@@ -270,6 +515,12 @@ else
+     cert_param="verify=0"
+ fi
+ 
++# VoidBR patch: avisa no log se o certificado do servidor mudou. Em segundo
++# plano, para nao atrasar a conexao quando o servidor ainda nao responde.
++if [ "$cert_param" != "verify=0" ] && [ -s "$servercrt" ]; then
++    check_certificate &
++fi
++
+ # Connect to the server, or keep retrying until the server gets online
+ # (for standalone workstations booted before the server).
+ if [ -s "$servercrt" ] || [ "$cert_param" = "verify=0" ]; then
+diff --git a/usr/share/epoptes-client/thumbshot.py b/usr/share/epoptes-client/thumbshot.py
+index 557829c..eeadacc 100755
+--- a/usr/share/epoptes-client/thumbshot.py
++++ b/usr/share/epoptes-client/thumbshot.py
+@@ -4,38 +4,269 @@
+ # SPDX-License-Identifier: GPL-3.0-or-later
+ """
+ Create a thumbshot of the current screen.
++
++PATCH (VoidBR): adiciona suporte a Wayland, mantendo o mesmo protocolo
++de saida que o epoptes original usa sobre X11 (cabecalho
++"rowstride\nWxH\n" + pixels RGB de 8 bits, sem alpha, linhas alinhadas
++a 4 bytes) para nao quebrar a compatibilidade com o servidor
++(epoptes/ui/gui.py le exatamente esse formato via
++GdkPixbuf.Pixbuf.new_from_bytes(..., Colorspace.RGB, has_alpha=False, 8, ...)).
++
++Metodo de captura por ambiente (deteccao automatica, com fallback):
++  - wlroots (Hyprland, Sway, river, labwc...): grim, via protocolo
++    wlr-screencopy. Detectado como padrao quando XDG_CURRENT_DESKTOP
++    nao indica GNOME nem KDE.
++  - GNOME: portal de captura (org.freedesktop.portal.Screenshot, nao
++    interativo). Desde o GNOME 41 o Shell recusa a interface privada
++    org.gnome.Shell.Screenshot a programas de fora (AccessDenied), entao o
++    portal e o caminho. Ele pede ao usuario, uma vez so, permissao para
++    capturas "a qualquer momento", e a escolha fica gravada. Precisa do
++    xdg-desktop-portal-gnome, e de nenhum portals.conf do usuario mandando o
++    GNOME para outro backend. A interface privada do Shell continua como
++    reserva, para GNOME antigo.
++  - KDE Plasma: spectacle -b -n -o <arquivo> (modo background, fala
++    com o KWin internamente).
++
++Em X11 (WAYLAND_DISPLAY nao definido), o caminho original via
++cairo/Gdk.get_default_root_window() continua exatamente igual, sem
++nenhuma alteracao - so importa PIL/cairo/Gdk quando realmente precisa
++de cada um, entao uma maquina X11 sem Pillow instalado nao quebra.
+ """
+ import os
++import shutil
++import subprocess
+ import sys
+-
+-import cairo
++import tempfile
+ 
+ from _common import gettext as _
+-from gi.repository import Gdk
+ 
++WAYLAND = bool(os.environ.get("WAYLAND_DISPLAY"))
++
++
++def _which(cmd):
++    return shutil.which(cmd) is not None
++
++
++def _detect_desktop():
++    """Melhor palpite sobre o compositor/DE em uso."""
++    desktop = (
++        os.environ.get("XDG_CURRENT_DESKTOP", "")
++        + " "
++        + os.environ.get("XDG_SESSION_DESKTOP", "")
++        + " "
++        + os.environ.get("DESKTOP_SESSION", "")
++    ).lower()
++    if "gnome" in desktop:
++        return "gnome"
++    if "kde" in desktop or "plasma" in desktop:
++        return "kde"
++    # Hyprland, Sway, river, labwc etc. nao usam XDG_CURRENT_DESKTOP
++    # de forma consistente; se nao for gnome/kde, tratamos como wlroots.
++    return "wlroots"
++
++
++def _capture_wlroots(png_path):
++    """Hyprland, Sway, river, labwc... via wlr-screencopy (protocolo)."""
++    if not _which("grim"):
++        raise RuntimeError("grim nao encontrado (necessario para wlroots)")
++    subprocess.run(["grim", png_path], check=True, timeout=10)
++
++
++def _capture_gnome_portal(png_path, espera=20):
++    """GNOME 41+: portal de captura de tela, sem dialogo (nao interativo)."""
++    import gi
++    gi.require_version("Gio", "2.0")
++    from gi.repository import Gio, GLib
++
++    portal = "org.freedesktop.portal.Desktop"
++    caminho = "/org/freedesktop/portal/desktop"
++    bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
++    remetente = bus.get_unique_name()[1:].replace(".", "_")
++    token = "epoptes_%d" % os.getpid()
++    pedido = "%s/request/%s/%s" % (caminho, remetente, token)
++    loop = GLib.MainLoop()
++    resultado = {}
++
++    def resposta(_con, _rem, _cam, _iface, _sinal, params):
++        resultado["codigo"], extras = params.unpack()
++        resultado["uri"] = extras.get("uri", "")
++        loop.quit()
++
++    # Assina a resposta antes de pedir, para nao perde-la
++    sub = bus.signal_subscribe(portal, "org.freedesktop.portal.Request",
++                               "Response", pedido, None,
++                               Gio.DBusSignalFlags.NONE, resposta)
++    try:
++        bus.call_sync(
++            portal, caminho, "org.freedesktop.portal.Screenshot", "Screenshot",
++            GLib.Variant("(sa{sv})", ("", {
++                "handle_token": GLib.Variant("s", token),
++                "interactive": GLib.Variant("b", False)})),
++            GLib.VariantType("(o)"), Gio.DBusCallFlags.NONE, 10000, None)
++    except GLib.Error as erro:
++        bus.signal_unsubscribe(sub)
++        if "portal.Screenshot" in erro.message:
++            raise RuntimeError(
++                "o portal nao oferece captura de tela: instale o "
++                "xdg-desktop-portal-gnome e veja se um "
++                "~/.config/xdg-desktop-portal/portals.conf nao manda o "
++                "GNOME para outro backend") from None
++        raise RuntimeError("portal: %s" % erro.message) from None
++    GLib.timeout_add_seconds(espera, loop.quit)
++    loop.run()
++    bus.signal_unsubscribe(sub)
++    if "codigo" not in resultado:
++        raise RuntimeError(
++            "o portal nao respondeu em %d s (pedido de permissao "
++            "esperando na tela?)" % espera)
++    if resultado["codigo"] != 0 or not resultado["uri"]:
++        raise RuntimeError(
++            "o portal recusou a captura (permissao negada? ela pode ser "
++            "liberada em Configuracoes > Privacidade)")
++    # O portal salva numa pasta do usuario; move para o diretorio
++    # temporario, que e apagado depois, para nao acumular capturas
++    shutil.move(Gio.File.new_for_uri(resultado["uri"]).get_path(), png_path)
++
++
++def _capture_gnome(png_path):
++    """GNOME antigo (antes do 41): interface D-Bus privada do Shell."""
++    if not _which("gdbus"):
++        raise RuntimeError("gdbus nao encontrado (necessario para GNOME)")
++    subprocess.run(
++        [
++            "gdbus", "call", "--session",
++            "--dest", "org.gnome.Shell",
++            "--object-path", "/org/gnome/Shell/Screenshot",
++            "--method", "org.gnome.Shell.Screenshot.Screenshot",
++            "true", "false", png_path,
++        ],
++        check=True, timeout=10, capture_output=True,
++    )
++
++
++def _capture_kde(png_path):
++    """KDE Plasma/KWin via spectacle em modo background (sem dialogo)."""
++    if not _which("spectacle"):
++        raise RuntimeError("spectacle nao encontrado (necessario para KDE)")
++    subprocess.run(
++        ["spectacle", "-b", "-n", "-o", png_path],
++        check=True, timeout=10, capture_output=True,
++    )
++
++
++def _capture_portal_fallback(png_path):
++    """
++    Ultimo recurso: portal XDG genérico (org.freedesktop.portal.Desktop).
++    Pode exibir um dialogo de permissao na primeira vez, dependendo do
++    backend de portal instalado. Preferir sempre um dos metodos acima.
++    """
++    if not _which("gdbus"):
++        raise RuntimeError("gdbus nao encontrado")
++    subprocess.run(
++        [
++            "gdbus", "call", "--session",
++            "--dest", "org.freedesktop.portal.Desktop",
++            "--object-path", "/org/freedesktop/portal/desktop",
++            "--method", "org.freedesktop.portal.Screenshot.Screenshot",
++            "", "{}",
++        ],
++        check=True, timeout=15, capture_output=True,
++    )
++    # Nota: essa chamada retorna um "handle" de Request, nao o arquivo
++    # diretamente; implementar o loop de resposta via D-Bus signal fica
++    # fora do escopo deste fallback simples. Preferir grim/gdbus Shell/
++    # spectacle, que escrevem o arquivo direto.
++    raise RuntimeError("fallback do portal generico nao implementado")
++
++
++def _screenshot_wayland_to_png(png_path):
++    desktop = _detect_desktop()
++    order = {
++        "wlroots": [_capture_wlroots, _capture_gnome, _capture_kde],
++        "gnome": [_capture_gnome_portal, _capture_gnome, _capture_wlroots,
++                  _capture_kde],
++        "kde": [_capture_kde, _capture_wlroots, _capture_gnome],
++    }[desktop]
++
++    errors = []
++    for method in order:
++        try:
++            method(png_path)
++            if os.path.exists(png_path) and os.path.getsize(png_path) > 0:
++                return
++        except Exception as exc:  # noqa: BLE001
++            errors.append(f"{method.__name__}: {exc}")
++
++    # Na dica do servidor cabe pouco: o motivo do metodo principal deste
++    # ambiente; os outros so no stderr (log do cliente).
++    print("Nenhum metodo de captura Wayland funcionou: " + " | ".join(errors),
++          file=sys.stderr)
++    raise RuntimeError(errors[0].split(": ", 1)[-1] if errors else
++                       "nenhum metodo de captura Wayland funcionou")
++
++
++def thumbshot_wayland(width, height):
++    """Captura via Wayland (grim/gdbus/spectacle) e reempacota como o
++    epoptes espera (mesmo formato que Gdk.pixbuf_get_from_surface geraria).
++    """
++    from PIL import Image  # import tardio: so exigido no caminho Wayland
++
++    with tempfile.TemporaryDirectory(prefix="epoptes-thumb-") as tmpdir:
++        png_path = os.path.join(tmpdir, "shot.png")
++        _screenshot_wayland_to_png(png_path)
++
++        img = Image.open(png_path).convert("RGB")
++        img = img.resize((width, height), Image.BILINEAR)
++
++        # GdkPixbuf (Colorspace.RGB, has_alpha=False, 8 bits) alinha cada
++        # linha a um multiplo de 4 bytes - replicamos isso manualmente.
++        row_bytes = width * 3
++        rowstride = (row_bytes + 3) & ~3
++        raw = img.tobytes()  # ja vem sem padding, width*height*3 bytes
++
++        if rowstride == row_bytes:
++            pixels = raw
++        else:
++            pad = b"\0" * (rowstride - row_bytes)
++            rows = [
++                raw[i:i + row_bytes] + pad
++                for i in range(0, len(raw), row_bytes)
++            ]
++            pixels = b"".join(rows)
++
++        return b"%i\n%ix%i\n" % (rowstride, width, height) + pixels
++
++
++def thumbshot_x11(width, height):
++    """Caminho original, inalterado, usado quando WAYLAND_DISPLAY nao
++    esta definido (sessao X11/Xorg de verdade)."""
++    import cairo
++    from gi.repository import Gdk
+ 
+-def thumbshot(width, height):
+-    """Return a thumbshot of the current screen as bytes."""
+     root = Gdk.get_default_root_window()
+     if root is None:
+         raise RuntimeError('Cannot find the root window, is xorg running?')
+     geometry = root.get_geometry()
+     surface = cairo.ImageSurface(cairo.FORMAT_RGB24, width, height)
+     ctx = cairo.Context(surface)
+-    # TODO: check if this actually does client-size resizing
+     ctx.scale(float(width) / geometry.width, float(height) / geometry.height)
+     Gdk.cairo_set_source_window(ctx, root, 0, 0)
+     ctx.paint()
+ 
+-    # TODO: is a pixbuf necessary, or can we get the bytes from the surface?
+     pixbuf = Gdk.pixbuf_get_from_surface(surface, 0, 0, width, height)
+     rowst = pixbuf.get_rowstride()
+     pixels = pixbuf.get_pixels()
+ 
+     return (b"%i\n%ix%i\n" % (rowst, width, height)
+             + pixels
+-            # TODO: the last padding isn't included, so do it manually
+-            + b"\0"*(rowst*height - len(pixels)))
++            + b"\0" * (rowst * height - len(pixels)))
++
++
++def thumbshot(width, height):
++    """Return a thumbshot of the current screen as bytes."""
++    if WAYLAND:
++        return thumbshot_wayland(width, height)
++    return thumbshot_x11(width, height)
+ 
+ 
+ def main():
+diff --git a/usr/share/epoptes/about.ui b/usr/share/epoptes/about.ui
+index 22edcde..9c30a47 100644
+--- a/usr/share/epoptes/about.ui
++++ b/usr/share/epoptes/about.ui
+@@ -12,7 +12,8 @@
+     <property name="website">https://epoptes.org</property>
+     <property name="website_label">https://epoptes.org</property>
+     <property name="authors">Alkis Georgopoulos &lt;alkisg@gmail.com&gt;
+-Fotis Tsamis &lt;ftsamis@gmail.com&gt;</property>
++Fotis Tsamis &lt;ftsamis@gmail.com&gt;
++Vilmar Catafesta &lt;vcatafesta@gmail.com&gt; (VoidBR: suporte a Wayland e melhorias)</property>
+     <property name="translator_credits" translatable="yes">translator-credits</property>
+     <property name="artists">Andrew Wedderburn (application icon)</property>
+     <property name="logo_icon_name">epoptes</property>
+diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
+index d54ba3b..546062e 100644
+--- a/usr/share/epoptes/client-functions
++++ b/usr/share/epoptes/client-functions
+@@ -6,6 +6,115 @@
+ # Implements the client side of the epoptes communications protocol.
+ # The daemon reads this file when it starts, and sends it to clients when they
+ # connect. The clients actually source it and then wait for further commands.
++#
++# ============================================================================
++# VoidBR patch - resumo das mudancas (ver comentarios inline em cada funcao
++# para o detalhe de cada uma). Este arquivo roda no SERVIDOR (o epoptesd
++# le e envia o conteudo dele para cada cliente na hora da conexao -
++# ver twisted/plugins/epoptesd.py, filter_bash()) - por isso o patch
++# tem que estar aqui tambem, e nao so no pacote epoptes-client:
++#
++# 1. thumbshot(): removido o bypass que pulava a captura inteira quando
++#    $WAYLAND_DISPLAY estava definido. A captura em si (grim/gdbus/
++#    spectacle conforme o compositor) fica no thumbshot.py, que so
++#    existe no pacote do CLIENTE - aqui so precisava parar de pular
++#    a chamada.
++#
++# 2. wayland_reverse_vnc() (nova) + get_monitored()/get_assisted():
++#    "Observar"/"Assistir" (duplo-clique) usavam x11vnc -connect_or_exit,
++#    que nao existe em Wayland. wayvnc e o equivalente pra compositores
++#    wlroots (Hyprland/Sway), mas so sabe ESCUTAR - nao tem modo de
++#    conectar pra fora. O socat faz essa ponte: disca pro servidor
++#    (a "conexao reversa" que o Epoptes espera) e repassa os bytes pro
++#    wayvnc, que fica escutando so em localhost. Detalhes:
++#      -d            desliga input remoto (so no modo "observar")
++#      -R            desliga o auto-resize do wayvnc; em placas mais
++#                    antigas (driver "radeon", por ex.) o kernel recusa
++#                    o modo customizado que isso gera ("[drm] User-
++#                    defined mode not supported"), derrubando a saida
++#                    no meio da sessao.
++#      host e porta  tem que ir como argumentos SEPARADOS pro wayvnc
++#                    ("host porta", nao "host:porta" numa string so).
++#    So funciona em Hyprland/Sway/wlroots do lado do cliente por
++#    enquanto - GNOME e KDE nao tem equivalente direto ao wayvnc ainda.
++#
++# 3. stop_receptions(): agora tambem mata o processo wayvnc (via
++#    EPOPTES_WAYVNC_PID), alem do que ja matava antes (VNCVIEWER_PID,
++#    que agora e o PID do socat do relay).
++#
++# 4. info(): a deteccao de rota/IP local (ip route get) morria com
++#    "die" na primeira falha, sem retry - diferente da resolucao de
++#    DNS (wait_for_dns(), que ja tinha esse cuidado). Em boot frio,
++#    se o autostart do compositor dispara antes da rede terminar de
++#    subir, isso matava o processo de sessao pra sempre (nao volta
++#    sozinho). Agora tenta por ate ~15 segundos antes de desistir.
++#
++# 5. xprop_set()/xprop_get()/xprop_unset(): guardavam PIDs (wayvnc,
++#    socat, screen-locker) como propriedades da janela raiz do X. Em
++#    Wayland puro (sem Xwayland/xprop) nada era gravado, entao nada era
++#    encerrado depois. Agora, com $WAYLAND_DISPLAY definido, cada valor
++#    vira um arquivo em $XDG_RUNTIME_DIR/epoptes-client/. Em X11 o
++#    comportamento continua o original.
++#
++# 6. ping(): em sessao de usuario, testava se o X estava vivo com xprop
++#    e chamava die "No X" se falhasse - em Wayland puro isso derrubava
++#    a conexao de sessao no primeiro ping. Agora, com $WAYLAND_DISPLAY
++#    definido, testa se o socket do compositor ainda existe. Em X11
++#    continua com xprop, como no original.
++#
++# 7. wayland_reverse_vnc(): quando o socat termina (o servidor fechou o
++#    Observar/Assistir), o wayvnc daquela sessao e encerrado junto, como
++#    o x11vnc -connect_or_exit faz. E o wayvnc usa um socket de controle
++#    proprio (-S), para nao colidir com um wayvnc que o usuario ja tenha
++#    aberto ("Another wayvnc process is already running"), e uma
++#    configuracao vazia propria (-C), para nao herdar senha/erros do
++#    ~/.config/wayvnc/config do usuario. Com wayvnc >= 0.10 usa tambem
++#    -e (--exit-on-disconnect), detectado pelo --help.
++#
++# 8. Para a interface do servidor (selos de estado e "Diagnosticar
++#    cliente"):
++#      info()            manda tambem session= (system/wayland/x11) e
++#                        desktop= ($XDG_CURRENT_DESKTOP).
++#      graphical_users() (nova) na conexao do root, lista os usuarios
++#                        com sessao grafica aberta na maquina - assim o
++#                        servidor sabe quando alguem logou mas a conexao
++#                        da sessao nao veio.
++#      diagnose()        (nova) roda o epoptes-client --check do cliente
++#                        e devolve a saida. Cliente sem --check recebe
++#                        so um aviso (sem o --check, o epoptes-client
++#                        trataria a opcao como nome de servidor e abriria
++#                        outra conexao).
++#      info()            manda tambem vnc= (wayvnc/x11vnc instalados),
++#                        para o servidor avisar antes do Observar/Assistir
++#                        quando o cliente nao tem como atender.
++#      thumbshot()       quando a captura falha, devolve uma linha
++#                        VBR_THUMBSHOT_ERROR=<motivo> em vez de nada, e o
++#                        servidor mostra o motivo no selo e na dica.
++#      reconnect()       (nova) refaz a conexao da sessao: sobe um
++#                        epoptes-client novo, desligado deste, e encerra o
++#                        shell atual com KILL, que nao dispara o
++#                        relancamento do on_signal. Com "drop", so encerra
++#                        (para conexoes duplicadas).
++#
++# 9. Observar/Assistir no GNOME com Wayland: o GNOME nao deixa programas de
++#    fora capturarem a tela (nem wayvnc, nem x11vnc), so o servidor VNC dele
++#    mesmo, o gnome-remote-desktop. gnome_vnc_session() (nova) inicia esse
++#    servidor so durante o Observar/Assistir, numa porta livre, com a senha
++#    que o servidor do Epoptes manda (gravada no chaveiro do GNOME, onde o
++#    gnome-remote-desktop a procura), e faz a ponte com o socat, como no
++#    wayvnc. No fim devolve a configuracao e a senha que o usuario tinha.
++#    O grdctl nao e usado: no Void (sem systemd) ele cai com falha de
++#    segmentacao; a configuracao vai pelo gsettings e a senha pelo
++#    secret-tool. Precisa do chaveiro destrancado. O GNOME mostra ao aluno
++#    o indicador de tela compartilhada, com um botao de parar.
++#
++# 10. wayland_alive() guarda a identidade do socket do Wayland (inode e hora,
++#     exportada em EPOPTES_WAYLAND_ID) e falha se o socket mudar. Sem isso, depois de sair
++#     e entrar de novo no GNOME, a conexao da sessao antiga se relancava (o
++#     on_signal) e o ping passava, porque o login novo cria outro socket com
++#     o mesmo nome; o servidor via uma sessao duplicada, presa ao ambiente da
++#     sessao que acabou.
++# ============================================================================
+ 
+ # Dash handles signals a bit differently from bash.
+ # We need to trap both 0 and 15 otherwise the trap function isn't called at all.
+@@ -20,8 +129,13 @@ on_signal() {
+ 
+     code="$?"
+     trap - 0 15
++    # VoidBR patch: sob runit, quem reinicia o servico do root e o runsv. Se
++    # o shell tambem se relancasse, cada sv stop/restart (ou vservice rm)
++    # deixaria um epoptes-client root orfao, fora do runit.
++    if [ "$runit_supervised" = true ]; then
++        echo "epoptes-client got signal: $1, leaving the restart to runit" >&5
+     # Don't relaunch if the system is shutting down
+-    if [ "$UID" -eq 0 ] && [ -d /run/systemd/system ] && [ -x /bin/systemctl ] &&
++    elif [ "$UID" -eq 0 ] && [ -d /run/systemd/system ] && [ -x /bin/systemctl ] &&
+         systemctl list-jobs | grep -q 'shutdown.target[[:space:]]*start'; then
+         echo "epoptes-client got signal: $1, but system is shutting down" >&5
+     else
+@@ -60,16 +174,64 @@ ensure_display() {
+     fi
+ }
+ 
++# VoidBR patch: diretorio de estado para sessoes Wayland, onde nao existe
++# janela raiz do X para guardar propriedades. Um arquivo por variavel.
++wayland_state_dir() {
++    local dir
++
++    dir="${XDG_RUNTIME_DIR:-/tmp}/epoptes-client"
++    test -n "$XDG_RUNTIME_DIR" || dir="/tmp/epoptes-client-$UID"
++    mkdir -p "$dir" 2>/dev/null && chmod 700 "$dir" 2>/dev/null
++    echo "$dir"
++}
++
++# VoidBR patch: testa se o compositor Wayland desta sessao ainda esta de pe
++# (o socket $WAYLAND_DISPLAY some quando o compositor encerra).
++wayland_alive() {
++    local sock id
++
++    case "$WAYLAND_DISPLAY" in
++    /*) sock=$WAYLAND_DISPLAY ;;
++    *) sock="${XDG_RUNTIME_DIR:-/run/user/$UID}/$WAYLAND_DISPLAY" ;;
++    esac
++    test -S "$sock" || return 1
++    # O socket tem o mesmo nome (wayland-0) a cada login; o que muda e o
++    # arquivo. Guarda a identidade dele no primeiro teste (inode e hora de
++    # criacao, em nanossegundos: o inode sozinho pode ser reaproveitado),
++    # exportada para um epoptes-client relancado pelo on_signal herdar. Se o
++    # socket for outro, esta conexao e de uma sessao que ja acabou (o D-Bus
++    # da sessao antiga pode continuar de pe depois do logout, entao ele nao
++    # serve de teste).
++    id=$(stat -c '%i %z' "$sock" 2>/dev/null) || return 0
++    if [ -z "$EPOPTES_WAYLAND_ID" ]; then
++        export EPOPTES_WAYLAND_ID="$id"
++    elif [ "$id" != "$EPOPTES_WAYLAND_ID" ]; then
++        return 1
++    fi
++}
++
+ xprop_set() {
++    if [ -n "$WAYLAND_DISPLAY" ]; then
++        echo "$2" >"$(wayland_state_dir)/$1"
++        return
++    fi
+     xprop -root -f "$1" 8u -set "$1" "$2"
+ }
+ 
+ xprop_get() {
++    if [ -n "$WAYLAND_DISPLAY" ]; then
++        cat "$(wayland_state_dir)/$1" 2>/dev/null
++        return 0
++    fi
+     # xprop -root UNSET_VAR echoes an error message to stdout instead of stderr
+     xprop -root "$1" 2>/dev/null | sed 's/^[^=]*//;s/^= "//;s/"$//;s/\\"/"/'
+ }
+ 
+ xprop_unset() {
++    if [ -n "$WAYLAND_DISPLAY" ]; then
++        rm -f "$(wayland_state_dir)/$1"
++        return 0
++    fi
+     xprop -root -remove "$1"
+ }
+ 
+@@ -139,14 +301,32 @@ info() {
+         else
+             server_ip=$(getent hosts "$SERVER" | awk '{ print $1; exit }')
+             server_ip=${server_ip:-$SERVER}
+-            read -r def_iface IP <<EOF
+-$(ip route get "$server_ip" | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
++
++            # VoidBR patch: em boot frio, a rede (rota padrao/DHCP) pode
++            # ainda nao estar de pe quando esta funcao roda pela primeira
++            # vez (ex: autostart do compositor disparando antes da rede
++            # terminar de subir). Em vez de morrer de cara, espera um
++            # pouco e tenta de novo, no mesmo espirito do wait_for_dns()
++            # que ja existe pra resolucao de nome.
++            net_retry=0
++            while :; do
++                read -r def_iface IP <<EOF
++$(ip route get "$server_ip" 2>/dev/null | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
+ EOF
+-            test "${def_iface:-lo}" != "lo" || read -r def_iface IP <<EOF
+-$(ip route get 192.168.67.0 | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
++                test "${def_iface:-lo}" != "lo" || read -r def_iface IP <<EOF
++$(ip route get 192.168.67.0 2>/dev/null | sed -n 's/.*dev *\([^ ]*\).*src *\([^ ]*\).*/\1 \2/p')
+ EOF
+-            test "${def_iface:-lo}" != "lo" || die "Empty def_iface"
+-            test -n "$IP" || die "Empty IP"
++                if [ "${def_iface:-lo}" != "lo" ] && [ -n "$IP" ]; then
++                    break
++                fi
++                net_retry=$((net_retry + 1))
++                if [ "$net_retry" -ge 15 ]; then
++                    test "${def_iface:-lo}" != "lo" || die "Empty def_iface"
++                    test -n "$IP" || die "Empty IP"
++                fi
++                sleep 1
++            done
++
+             MAC=$(main_mac)
+             MAC=${MAC%% *}
+             test -n "$MAC" || die "Empty MAC"
+@@ -177,9 +357,127 @@ cpu=$CPU
+ ram=$RAM
+ vga=$VGA
+ os=$OS
++session=$(session_type)
++desktop=${XDG_CURRENT_DESKTOP:-$DESKTOP_SESSION}
++vnc=$(vnc_servers)
+ EOF
+ }
+ 
++# VoidBR patch: servidores VNC instalados, separados por virgula.
++vnc_servers() {
++    local v list
++
++    for v in wayvnc x11vnc; do
++        command -v "$v" >/dev/null 2>&1 && list="${list:+$list,}$v"
++    done
++    # grd: o servidor VNC do GNOME e o secret-tool, para gravar a senha
++    if grd_daemon >/dev/null && command -v secret-tool >/dev/null 2>&1; then
++        list="${list:+$list,}grd"
++    fi
++    echo "$list"
++}
++
++# VoidBR patch: caminho do gnome-remote-desktop-daemon. No Void fica em
++# /usr/libexec; no Arch, o libexec e o proprio /usr/lib.
++grd_daemon() {
++    local f
++
++    for f in /usr/libexec/gnome-remote-desktop-daemon \
++        /usr/lib/gnome-remote-desktop-daemon \
++        /usr/lib/gnome-remote-desktop/gnome-remote-desktop-daemon; do
++        if [ -x "$f" ]; then
++            echo "$f"
++            return 0
++        fi
++    done
++    return 1
++}
++
++# VoidBR patch: sessao grafica GNOME? ($XDG_CURRENT_DESKTOP pode ser uma
++# lista, como "ubuntu:GNOME" ou "GNOME-Classic:GNOME")
++gnome_session() {
++    case ":$XDG_CURRENT_DESKTOP:" in
++    *:GNOME:*) return 0 ;;
++    esac
++    return 1
++}
++
++# VoidBR patch: refaz a conexao da sessao, a pedido do servidor.
++# Parameters:
++# $1 = "drop" para so encerrar esta conexao, sem subir outra.
++reconnect() {
++    if [ "$UID" -eq 0 ]; then
++        echo "reconnect: so na conexao da sessao" >&5
++        return 0
++    fi
++    trap - 0 15
++    if [ "$1" != drop ]; then
++        echo "epoptes-client: reconectando a pedido do servidor" >&5
++        # Espera este shell morrer, para o epoptes-client novo nao ver a
++        # conexao antiga. O setsid desliga o novo deste shell.
++        (
++            sleep 2
++            if command -v setsid >/dev/null 2>&1; then
++                exec setsid epoptes-client $SERVER $PORT </dev/null >&5 2>&1
++            fi
++            exec epoptes-client $SERVER $PORT </dev/null >&5 2>&1
++        ) &
++    else
++        echo "epoptes-client: conexao encerrada a pedido do servidor" >&5
++    fi
++    kill -KILL $$
++}
++
++# VoidBR patch: tipo da conexao, para a interface do servidor.
++session_type() {
++    if [ "$UID" -eq 0 ]; then
++        echo system
++    elif [ -n "$WAYLAND_DISPLAY" ]; then
++        echo wayland
++    elif [ -n "$DISPLAY" ]; then
++        echo x11
++    else
++        echo "${XDG_SESSION_TYPE:-unknown}"
++    fi
++}
++
++# VoidBR patch: usuarios com sessao grafica aberta nesta maquina, separados
++# por virgula. So na conexao do root (precisa ler o environ de todos os
++# processos). Conta quem tem processo com DISPLAY/WAYLAND_DISPLAY e uid de
++# usuario comum (>= UID_MIN), o que deixa de fora o greeter (sddm, gdm...).
++graphical_users() {
++    local uid_min
++
++    test "$UID" -eq 0 || return 0
++    uid_min=$(awk '$1 == "UID_MIN" { print $2; exit }' /etc/login.defs 2>/dev/null)
++    grep -lsa 'DISPLAY=' /proc/[0-9]*/environ 2>/dev/null |
++        sed 's|/environ$||' | xargs -r stat -c '%u %U' 2>/dev/null |
++        awk -v min="${uid_min:-1000}" '$1 >= min && $1 < 65534 { print $2 }' |
++        sort -u | paste -sd ',' -
++}
++
++# VoidBR patch: "Diagnosticar cliente" da interface do servidor. Roda o
++# epoptes-client --check e devolve a saida. O stdin vai para /dev/null: o
++# stdin deste shell e a propria conexao com o servidor, e o openssl do
++# --check leria os proximos comandos dela.
++diagnose() {
++    local ec
++
++    ec=$(command -v epoptes-client 2>/dev/null)
++    test -n "$ec" || ec=/usr/sbin/epoptes-client
++    if ! grep -qs 'run_check' "$ec"; then
++        echo "  [FALHA] o epoptes-client desta maquina nao tem o --check"
++        echo "          -> atualize o pacote do cliente (voidbr-epoptes-client ou chili-epoptes-client)"
++        return 0
++    fi
++    if command -v timeout >/dev/null 2>&1; then
++        timeout 20 "$ec" --check </dev/null 2>&1
++    else
++        "$ec" --check </dev/null 2>&1
++    fi
++    return 0
++}
++
+ # Execute a command in the background and optionally print its pid.
+ # For internal use. Parameters:
+ # [-p]   = print the pid.
+@@ -260,17 +558,27 @@ shutdown() {
+ # $2 = thumbshot height.
+ thumbshot() {
+     # TODO: remove compatibility fallback after a few versions
++    # VoidBR patch: thumbshot.py agora sabe capturar em Wayland
++    # (grim/gdbus/spectacle), entao nao pulamos mais o thumbshot
++    # so por causa de WAYLAND_DISPLAY estar definido.
+     local executable
+ 
+-    test -z "$WAYLAND_DISPLAY" || return 0
+     if [ -f "./thumbshot.py" ]; then
+         executable=./thumbshot.py
+     else
+         executable=./screenshot
+     fi
+-    if ! $executable "$1" "$2"; then
++    # VoidBR patch: guarda o stderr para devolver o motivo da falha. A
++    # imagem continua indo direto para o stdout (o fd 3 so existe aqui).
++    { err=$($executable "$1" "$2" 2>&1 >&3 3>&-); } 3>&1
++    if [ $? -ne 0 ]; then
+         BAD_THUMBSHOTS=$((BAD_THUMBSHOTS + 1))
+         echo "$BAD_THUMBSHOTS failed thumbshots so far!" >&5
++        echo "$err" >&5
++        err=$(echo "$err" | grep . | tail -n 1 | sed 's/^[A-Za-z]*Error: //')
++        echo "VBR_THUMBSHOT_ERROR=${err:-a captura falhou sem mensagem}"
++    elif [ -n "$err" ]; then
++        echo "$err" >&2
+     fi
+ }
+ 
+@@ -378,19 +686,246 @@ message() {
+     fi
+ }
+ 
++# Cria uma "conexao reversa" para um servidor VNC que so sabe escutar
++# (como o wayvnc), replicando o que x11vnc -connect_or_exit faz nativamente:
++# o wayvnc sobe escutando so em localhost, e o socat disca pro servidor
++# (equivalente a "$1" = host:porta do Epoptes) fazendo o bridge dos bytes.
++# Parametros:
++# $1 = host:port do servidor (o "${GUI_IP}:porta" que o Epoptes manda).
++# $2 = "viewonly" (observar, sem controlar) ou "assist" (com controle).
++wayland_reverse_vnc() {
++    local target="$1" mode="$2" wport wpid spid old_pid ctl cfg exitopt
++
++    if ! command -v wayvnc >/dev/null 2>&1; then
++        echo "wayland_reverse_vnc: wayvnc nao encontrado, instale o pacote wayvnc" >&5
++        return 1
++    fi
++    if ! command -v socat >/dev/null 2>&1; then
++        echo "wayland_reverse_vnc: socat nao encontrado" >&5
++        return 1
++    fi
++
++    # Ao contrario do x11vnc -connect_or_exit (que sai sozinho assim que
++    # a conexao cai), o wayvnc fica escutando pra sempre depois que a
++    # sessao termina. Sem isso, cada nova tentativa de Observar/Assistir
++    # deixava mais uma instancia zumbi pra tras, competindo pelo mesmo
++    # recurso de captura de tela do compositor - normalmente so uma
++    # sessao de wlr-screencopy e permitida por vez, entao a segunda
++    # instancia falhava silenciosamente (background() nao verifica se o
++    # processo realmente conseguiu comecar a escutar). Por isso sempre
++    # matamos qualquer sessao anterior antes de abrir uma nova.
++    ensure_display
++    old_pid=$(xprop_get EPOPTES_WAYVNC_PID)
++    test -z "$old_pid" || kill "$old_pid" 2>/dev/null
++    old_pid=$(xprop_get EPOPTES_VNCVIEWER_PID)
++    test -z "$old_pid" || kill "$old_pid" 2>/dev/null
++
++    # Porta livre em localhost, escolhida pelo proprio kernel (porta 0).
++    wport=$(python3 -c '
++import socket
++s = socket.socket()
++s.bind(("127.0.0.1", 0))
++print(s.getsockname()[1])
++s.close()
++' 2>/dev/null)
++    if [ -z "$wport" ]; then
++        echo "wayland_reverse_vnc: nao consegui escolher uma porta livre" >&5
++        return 1
++    fi
++
++    # -R (--disable-resizing): impede o wayvnc de tentar redimensionar
++    # a saida automaticamente para bater com o cliente VNC. Em placas
++    # mais antigas (driver "radeon", por exemplo) o kernel pode recusar
++    # esse modo customizado ("[drm] User-defined mode not supported"),
++    # o que derruba a saida no meio da sessao ("Selected output ...
++    # went away" no log do wayvnc).
++    # -S: socket de controle proprio. Sem isso o wayvnc usa o padrao
++    # ($XDG_RUNTIME_DIR/wayvncctl) e aborta com "Another wayvnc process is
++    # already running" se o usuario ja tiver um wayvnc aberto.
++    ctl="$(wayland_state_dir)/wayvncctl"
++    # -C: configuracao vazia propria. Sem isso o wayvnc le
++    # ~/.config/wayvnc/config do usuario; se ali tiver enable_auth=true o
++    # visualizador do Epoptes (sem senha) nao conecta, e se o arquivo
++    # tiver erro o wayvnc nem sobe.
++    cfg="$(wayland_state_dir)/wayvnc.config"
++    : >"$cfg"
++    # -e (--exit-on-disconnect, wayvnc >= 0.10): o proprio wayvnc encerra
++    # quando o servidor fecha a conexao. Versoes antigas nao tem a opcao;
++    # nelas o relay abaixo e quem encerra o wayvnc.
++    exitopt=""
++    if wayvnc --help 2>&1 | grep -q -- --exit-on-disconnect; then
++        exitopt="-e"
++    fi
++    if [ "$mode" = viewonly ]; then
++        wpid=$(background -p wayvnc -C "$cfg" -S "$ctl" $exitopt -d -R 127.0.0.1 "$wport")
++    else
++        wpid=$(background -p wayvnc -C "$cfg" -S "$ctl" $exitopt -R 127.0.0.1 "$wport")
++    fi
++
++    # Da um tempo pro wayvnc comecar a escutar antes do socat tentar.
++    sleep 0.3
++
++    # Quando o socat termina (servidor fechou o Observar/Assistir), encerra
++    # o wayvnc desta sessao, como o x11vnc -connect_or_exit faria sozinho.
++    spid=$(background -p sh -c 'socat "TCP:$1" "TCP:127.0.0.1:$2"; kill "$3" 2>/dev/null' \
++        epoptes-vnc-relay "$target" "$wport" "$wpid")
++
++    xprop_set EPOPTES_WAYVNC_PID "$wpid"
++    xprop_set EPOPTES_VNCVIEWER_PID "$spid"
++}
++
++# VoidBR patch: Observar/Assistir no GNOME com Wayland, pelo servidor VNC do
++# proprio GNOME (ver o item 9 no topo). Roda em segundo plano, porque gravar
++# a senha pode esperar o usuario destrancar o chaveiro, e este shell nao
++# pode ficar preso (o servidor manda os pings por ele).
++# Parameters:
++# $1 = host:port.
++# $2 = viewonly ou assist.
++# $3 = senha do VNC, gerada pelo servidor do Epoptes.
++gnome_reverse_vnc() {
++    local grd c
++
++    if ! grd=$(grd_daemon); then
++        echo "gnome_reverse_vnc: gnome-remote-desktop nao encontrado, instale o pacote" >&5
++        return 1
++    fi
++    for c in secret-tool socat gsettings ss; do
++        if ! command -v "$c" >/dev/null 2>&1; then
++            echo "gnome_reverse_vnc: $c nao encontrado" >&5
++            return 1
++        fi
++    done
++    if [ -z "$3" ]; then
++        echo "gnome_reverse_vnc: o servidor nao mandou a senha do VNC" >&5
++        return 1
++    fi
++    gnome_vnc_stop
++    background gnome_vnc_session "$grd" "$1" "$2" "$3"
++}
++
++# VoidBR patch: encerra o Observar/Assistir do GNOME em andamento. Basta
++# encerrar o servidor do GNOME: o socat termina junto e o gnome_vnc_session
++# devolve a configuracao e a senha do usuario.
++gnome_vnc_stop() {
++    local pid
++
++    pid=$(xprop_get EPOPTES_GRD_PID)
++    if [ -n "$pid" ] && kill "$pid" 2>/dev/null; then
++        sleep 1
++    fi
++}
++
++# VoidBR patch: uma sessao do Observar/Assistir no GNOME, do comeco ao fim.
++# Parameters: $1 = gnome-remote-desktop-daemon, $2 = host:port,
++# $3 = viewonly ou assist, $4 = senha.
++gnome_vnc_session() {
++    local grd="$1" target="$2" mode="$3" pwd="$4" schema xdg dir port gpid
++    local antiga tentativa k v
++
++    schema=org.gnome.desktop.remote-desktop.vnc
++    xdg=org.gnome.RemoteDesktop.VncCredentials
++    dir=$(wayland_state_dir)
++    # Dois servidores do GNOME na mesma sessao disputam o mesmo nome no
++    # D-Bus; se o usuario ja ligou o compartilhamento de tela, desiste.
++    if pgrep -u "$UID" -f gnome-remote-desktop-daemon >/dev/null; then
++        echo "gnome_vnc_session: o compartilhamento de tela do GNOME ja esta ligado nesta sessao" >&5
++        return 1
++    fi
++    port=$(python3 -c '
++import socket
++s = socket.socket()
++s.bind(("127.0.0.1", 0))
++print(s.getsockname()[1])
++s.close()
++' 2>/dev/null)
++    if [ -z "$port" ]; then
++        echo "gnome_vnc_session: nao consegui escolher uma porta livre" >&5
++        return 1
++    fi
++
++    # Guarda o que o usuario tinha, para devolver no fim. O timeout evita
++    # ficar preso para sempre se o chaveiro estiver trancado e ninguem
++    # digitar a senha dele na tela.
++    for k in enable auth-method view-only; do
++        echo "$k $(gsettings get "$schema" "$k")"
++    done >"$dir/grd-settings"
++    antiga=$(timeout 60 secret-tool lookup xdg:schema "$xdg" 2>/dev/null)
++    # O gnome-remote-desktop guarda a senha como texto de um GVariant de
++    # string, ou seja, entre aspas simples: 'senha'.
++    if ! printf "'%s'" "$pwd" | timeout 60 secret-tool store \
++        --label='GNOME Remote Desktop VNC password' xdg:schema "$xdg"; then
++        echo "gnome_vnc_session: nao consegui gravar a senha no chaveiro do GNOME (trancado?)" >&5
++        rm -f "$dir/grd-settings"
++        return 1
++    fi
++    gsettings set "$schema" auth-method "'password'"
++    if [ "$mode" = viewonly ]; then
++        gsettings set "$schema" view-only true
++    else
++        gsettings set "$schema" view-only false
++    fi
++    gsettings set "$schema" enable true
++
++    "$grd" --vnc-port "$port" >"$dir/grd.log" 2>&1 &
++    gpid=$!
++    xprop_set EPOPTES_GRD_PID "$gpid"
++    # Espera ate 10 s o servidor do GNOME comecar a escutar.
++    tentativa=0
++    while [ "$tentativa" -lt 50 ] && kill -0 "$gpid" 2>/dev/null &&
++        ! ss -Hltn "sport = :$port" 2>/dev/null | grep -q .; do
++        tentativa=$((tentativa + 1))
++        sleep 0.2
++    done
++    if kill -0 "$gpid" 2>/dev/null; then
++        # Termina quando o servidor do Epoptes fecha o visualizador, quando o
++        # aluno clica em parar no indicador do GNOME, ou no stop_receptions.
++        socat "TCP:$target" "TCP:127.0.0.1:$port"
++    else
++        echo "gnome_vnc_session: o gnome-remote-desktop nao subiu, veja $dir/grd.log" >&5
++    fi
++
++    kill "$gpid" 2>/dev/null
++    wait "$gpid" 2>/dev/null
++    xprop_unset EPOPTES_GRD_PID
++    while read -r k v; do
++        gsettings set "$schema" "$k" "$v"
++    done <"$dir/grd-settings"
++    rm -f "$dir/grd-settings"
++    if [ -n "$antiga" ]; then
++        printf '%s' "$antiga" | timeout 60 secret-tool store \
++            --label='GNOME Remote Desktop VNC password' xdg:schema "$xdg"
++    else
++        timeout 60 secret-tool clear xdg:schema "$xdg"
++    fi
++}
++
+ # Connect to the server to be monitored.
+ # Parameters:
+ # $1 = host:port.
++# $2 = VoidBR patch: senha do VNC (so o GNOME com Wayland usa).
+ get_monitored() {
+-    background x11vnc -q -nopw -noshm -24to32 -viewonly -connect_or_exit "$1"
++    if [ -n "$WAYLAND_DISPLAY" ] && gnome_session; then
++        gnome_reverse_vnc "$1" viewonly "$2"
++    elif [ -n "$WAYLAND_DISPLAY" ]; then
++        wayland_reverse_vnc "$1" viewonly
++    else
++        background x11vnc -q -nopw -noshm -24to32 -viewonly -connect_or_exit "$1"
++    fi
+ }
+ 
+ # Connect to the server to get assistance.
+ # Parameters:
+ # $1 = host:port.
+ # $2 = grab keyboard and mouse.
++# $3 = VoidBR patch: senha do VNC (so o GNOME com Wayland usa).
+ get_assisted() {
+-    background x11vnc -q -nopw -noshm -24to32 ${2:+-grabptr -grabkbd} -connect_or_exit "$1"
++    if [ -n "$WAYLAND_DISPLAY" ] && gnome_session; then
++        gnome_reverse_vnc "$1" assist "$3"
++    elif [ -n "$WAYLAND_DISPLAY" ]; then
++        wayland_reverse_vnc "$1" assist
++    else
++        background x11vnc -q -nopw -noshm -24to32 ${2:+-grabptr -grabkbd} -connect_or_exit "$1"
++    fi
+ }
+ 
+ # Deactivate the screensaver, in order for the users to watch a broadcast.
+@@ -468,7 +1003,7 @@ receive_broadcast() {
+ # The vnc clients should automatically exit when the server is killed.
+ # Unfortunately, that isn't always true, so try to kill them anyway.
+ stop_receptions() {
+-    local pid
++    local pid wpid
+ 
+     unset receiving_broadcast
+     ensure_display
+@@ -477,6 +1012,14 @@ stop_receptions() {
+         kill "$pid"
+         xprop_unset EPOPTES_VNCVIEWER_PID
+     fi
++    wpid=$(xprop_get EPOPTES_WAYVNC_PID)
++    if [ -n "$wpid" ]; then
++        kill "$wpid"
++        xprop_unset EPOPTES_WAYVNC_PID
++    fi
++    # VoidBR patch: Observar/Assistir do GNOME (a limpeza fica com ele)
++    wpid=$(xprop_get EPOPTES_GRD_PID)
++    test -z "$wpid" || kill "$wpid" 2>/dev/null
+ }
+ 
+ # Open a root terminal inside the X session.
+@@ -507,7 +1050,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
+ # exit automatically, so tell it to exit as soon as X is unavailable.
+ ping() {
+     if [ "$UID" -gt 0 ]; then
+-        xprop -root -f EPOPTES_CLIENT 32c -set EPOPTES_CLIENT $$ || die "No X"
++        # VoidBR patch: em Wayland puro nao ha X para o xprop testar; ve se
++        # o compositor desta sessao ainda esta de pe. Em X11, o original.
++        if [ -n "$WAYLAND_DISPLAY" ]; then
++            wayland_alive || die "No Wayland"
++        else
++            xprop -root -f EPOPTES_CLIENT 32c -set EPOPTES_CLIENT $$ || die "No X"
++        fi
+     fi
+     if [ "$receiving_broadcast" = true ]; then
+         reset_screensaver
+@@ -533,6 +1082,23 @@ info
+ # Prevent dbus from getting autolaunched (issue #66)
+ export "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/dev/null}"
+ 
++# VoidBR patch: runit_supervised - descobre, enquanto o socat ainda esta
++# vivo, se ele e filho do runsv (servico runit do root). Calculado aqui, ao
++# carregar, porque no on_signal o socat ja pode ter morrido.
++runit_supervised=false
++if [ "$UID" -eq 0 ]; then
++    _gp=$(ps -o ppid= -p "$PPID" 2>/dev/null | tr -d ' ')
++    if [ -n "$_gp" ] && [ "$(ps -o comm= -p "$_gp" 2>/dev/null)" = runsv ]; then
++        runit_supervised=true
++    fi
++fi
++
++# VoidBR patch: conexao de sessao Wayland que nasceu de um relancamento
++# depois do logout (com o ambiente da sessao que acabou) encerra ja aqui.
++if [ "$UID" -gt 0 ] && [ -n "$WAYLAND_DISPLAY" ]; then
++    wayland_alive || die "No Wayland (sessao encerrada ou de outro login)"
++fi
++
+ for i in 0 15; do
+     trap "on_signal $i" $i
+ done
+diff --git a/usr/share/epoptes/epoptes.ui b/usr/share/epoptes/epoptes.ui
+index 5840773..ba26367 100644
+--- a/usr/share/epoptes/epoptes.ui
++++ b/usr/share/epoptes/epoptes.ui
+@@ -720,6 +720,47 @@
+                         <signal name="activate" handler="on_imi_clients_information_activate" swapped="no"/>
+                       </object>
+                     </child>
++                    <child>
++                      <object class="GtkMenuItem" id="imi_clients_diagnose">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">_Diagnosticar cliente...</property>
++                        <property name="use_underline">True</property>
++                        <signal name="activate" handler="on_imi_clients_diagnose_activate" swapped="no"/>
++                      </object>
++                    </child>
++                    <child>
++                      <object class="GtkMenuItem" id="imi_clients_reconnect">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">_Reconectar sessão</property>
++                        <property name="use_underline">True</property>
++                        <signal name="activate" handler="on_imi_clients_reconnect_activate" swapped="no"/>
++                      </object>
++                    </child>
++                  </object>
++                </child>
++              </object>
++            </child>
++            <child>
++              <object class="GtkMenuItem" id="mni_settings">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="label">Co_nfigurações</property>
++                <property name="use_underline">True</property>
++                <child type="submenu">
++                  <object class="GtkMenu">
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <child>
++                      <object class="GtkMenuItem" id="imi_settings">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">Configurações do _Epoptes...</property>
++                        <property name="use_underline">True</property>
++                        <signal name="activate" handler="on_imi_settings_activate" swapped="no"/>
++                      </object>
++                    </child>
+                   </object>
+                 </child>
+               </object>
+@@ -734,6 +775,21 @@
+                   <object class="GtkMenu">
+                     <property name="visible">True</property>
+                     <property name="can_focus">False</property>
++                    <child>
++                      <object class="GtkMenuItem" id="imi_help_manual">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">_Manual do VoidBR</property>
++                        <property name="use_underline">True</property>
++                        <signal name="activate" handler="on_imi_help_manual_activate" swapped="no"/>
++                      </object>
++                    </child>
++                    <child>
++                      <object class="GtkSeparatorMenuItem">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                      </object>
++                    </child>
+                     <child>
+                       <object class="GtkImageMenuItem" id="imi_help_home">
+                         <property name="label">gtk-home</property>

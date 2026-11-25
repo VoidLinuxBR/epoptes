@@ -1,0 +1,166 @@
+# Maintainer: Vilmar Catafesta <vcatafesta@gmail.com>
+#
+# Um repositorio (voidlinuxbr/epoptes), dois pacotes - como o AUR faz:
+# a arvore usr/ etc/ tem servidor e cliente juntos e cada package_*()
+# leva so a sua parte. As traducoes (usr/share/locale) vao nos dois.
+
+pkgname=(chili-epoptes chili-epoptes-client)
+pkgbase=chili-epoptes
+_reponame=epoptes
+pkgver=20261125.0000
+pkgrel=1
+pkgdesc='An opensource computer lab management and monitoring tool'
+arch=(any)
+url="https://github.com/voidlinuxbr/${_reponame}"
+license=(GPL-3.0-or-later)
+# o que os DOIS usam
+depends=(
+	gobject-introspection
+	gtk3
+	iperf
+	iproute2
+	librsvg
+	openssl
+	python
+	python-cairo
+	python-gobject
+	socat
+	tigervnc
+	x11vnc
+	xterm
+)
+makedepends=(git patch python)
+source=(
+	"${_reponame}::git+${url}.git"
+	"voidbr-epoptes.patch"
+)
+sha256sums=(
+	'SKIP'
+	'e47d0894f56a35081d4c9211ecdf6f6f8eaab816f6b43825570b60f7e4a12090'
+)
+
+# arquivos que sao so do cliente (o resto da arvore e do servidor)
+_cliente=(
+	etc/default/epoptes-client
+	etc/sv/epoptes-client
+	etc/xdg/autostart/epoptes-client.desktop
+	usr/lib/systemd/system/epoptes-client.service
+	usr/sbin/epoptes-client
+	usr/share/epoptes-client
+	usr/share/licenses/epoptes-client
+	usr/share/man/man8/epoptes-client.8
+)
+
+pkgver() {
+	cd "$_reponame"
+	git log -1 --format=%cd --date=format:%Y%m%d.%H%M
+}
+
+prepare() {
+	cd "$_reponame"
+	# VoidBR patch (o mesmo do pacote Void, gerado com ./gera-patch.sh).
+	# Servidor: client-functions com o suporte a Wayland enviado aos clientes,
+	# melhorias da interface (gui.py/epoptes.ui), aviso do grupo epoptes no
+	# usr/bin/epoptes e fix Python 3.14.
+	# Cliente: miniaturas em Wayland (thumbshot.py), epoptes-client --check,
+	# aviso de certificado trocado e espera pelo nome do servidor.
+	patch -p1 < "$srcdir/voidbr-epoptes.patch"
+}
+
+# Modelo Chili (chili-xfce-config): tudo vai para /usr/share/${pkgname} no
+# pacote e o .install copia para / no post_install.
+_stage_comum() {
+	local stage="$1"
+	# etc/sv e do runit (Void); no Arch o servico vem das units do systemd.
+	rm -rf "${stage}/etc/sv"
+	# etc/default fica como arquivo do pacman (backup=), fora da copia do
+	# post_install, para o upgrade nao sobrescrever a configuracao local.
+	rm -rf "${stage}/etc/default"
+	find "${stage}" -depth -type d -empty -delete
+	find "${stage}" -type d -name __pycache__ -prune -exec rm -rf {} +
+	install -Dm644 "${srcdir}/${_reponame}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+	install -Dm644 "${srcdir}/${_reponame}/README.md" "${pkgdir}/usr/share/doc/${pkgname}/README.md"
+}
+
+#################### servidor ####################
+package_chili-epoptes() {
+	pkgdesc+=' (servidor, com suporte a Wayland nos clientes)'
+	depends+=(
+		libfaketime
+		libnotify
+		notification-daemon
+		python-dbus
+		python-netifaces
+		python-pyopenssl
+		python-service-identity
+		python-twisted
+	)
+	optdepends=('xfce4-notifyd: XFCE notification support')
+	provides=(epoptes)
+	conflicts=(epoptes)
+	backup=(etc/default/epoptes)
+	install=chili-epoptes.install
+
+	local stage="${pkgdir}/usr/share/${pkgname}" dir p pyver
+	cd "${srcdir}/${_reponame}"
+	install -dm755 "$stage"
+	for dir in usr etc opt; do
+		[ -d "$dir" ] && cp -a "$dir" "$stage/"
+	done
+	for p in "${_cliente[@]}"; do
+		rm -rf "${stage:?}/$p"
+	done
+	install -Dm644 etc/default/epoptes "${pkgdir}/etc/default/epoptes"
+	# Os arquivos Python estao versionados em usr/lib/python3.14. Se o python
+	# de quem gera o pacote for outro (3.15...), move para o caminho certo.
+	pyver=$(python -c 'import sys; print("python%d.%d" % sys.version_info[:2])')
+	if [ -n "$pyver" ] && [ "$pyver" != python3.14 ] && [ -d "${stage}/usr/lib/python3.14" ]; then
+		mv "${stage}/usr/lib/python3.14" "${stage}/usr/lib/${pyver}"
+	fi
+	_stage_comum "$stage"
+}
+
+#################### cliente ####################
+package_chili-epoptes-client() {
+	pkgdesc+=' (cliente, miniaturas em Wayland: Hyprland/wlroots, GNOME, KDE Plasma)'
+	# grim      -> miniaturas em Hyprland/Sway/river/labwc (wlroots)
+	# wayvnc    -> observar/assistir em Hyprland/Sway/wlroots
+	# spectacle -> miniaturas em KDE Plasma Wayland
+	# xorg-xprop/xset/xwininfo -> sessoes X11
+	depends+=(
+		dbus
+		grim
+		procps-ng
+		python-pillow
+		screen
+		spectacle
+		wayvnc
+		xorg-xprop
+		xorg-xset
+		xorg-xwininfo
+	)
+	# GNOME com Wayland: pacotes do proprio GNOME (sem eles o servidor avisa)
+	optdepends=(
+		'gnome-remote-desktop: observar/assistir em GNOME com Wayland'
+		'libsecret: secret-tool, senha do observar/assistir em GNOME'
+		'xdg-desktop-portal-gnome: thumbshots em GNOME com Wayland'
+	)
+	provides=(epoptes-client)
+	conflicts=(epoptes-client)
+	backup=(etc/default/epoptes-client)
+	install=chili-epoptes-client.install
+
+	local stage="${pkgdir}/usr/share/${pkgname}" p
+	cd "${srcdir}/${_reponame}"
+	for p in "${_cliente[@]}" usr/share/locale; do
+		mkdir -p "$stage/$(dirname "$p")"
+		cp -a "$p" "$stage/$p"
+	done
+	# No Arch /usr/sbin e link para /usr/bin (pacote filesystem): copiar
+	# uma pasta usr/sbin por cima dele falha. A unit do systemd e o
+	# autostart chamam /usr/sbin/epoptes-client, que resolve pelo link.
+	install -Dm755 "${stage}/usr/sbin/epoptes-client" "${stage}/usr/bin/epoptes-client"
+	rm -rf "${stage}/usr/sbin"
+	install -Dm644 etc/default/epoptes-client "${pkgdir}/etc/default/epoptes-client"
+	_stage_comum "$stage"
+}
