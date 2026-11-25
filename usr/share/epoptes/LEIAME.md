@@ -11,7 +11,7 @@ Esta versão é a do Epoptes oficial (epoptes.org) com as mudanças do VoidBR: s
 | Servidor (máquina do professor) | voidbr-epoptes | chili-epoptes |
 | Cliente (máquinas dos alunos) | voidbr-epoptes-client | chili-epoptes-client |
 
-Repositórios: github.com/voidlinuxbr/voidbr-epoptes e github.com/voidlinuxbr/voidbr-epoptes-client.
+Repositório: github.com/voidlinuxbr/epoptes (gera os dois pacotes).
 
 ## Instalação do servidor
 
