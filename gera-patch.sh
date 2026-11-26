@@ -4,7 +4,7 @@
 #  gera-patch.sh — mantem o .patch do pacote em pkgfile/ (Void) e pkgbuild/
 #                  (Arch) iguais e com o sha256sums certo nas duas receitas
 #  Created: ter 24 nov 2026 19:56:59 -04
-#  Updated: ter 24 nov 2026 19:56:59 -04
+#  Updated: qui 26 nov 2026 14:19:42 -04
 #
 #  Copyright (c) 2026, Vilmar Catafesta <vcatafesta@gmail.com>
 #
@@ -18,7 +18,7 @@
 #    ./gera-patch.sh conferir   confere: patch aplica, as duas copias sao
 #                               iguais e o sha256 bate nas duas receitas
 
-declare _VERSION_="1.0.0-20261124"
+declare _VERSION_="1.0.1-20261126"
 declare -a dirs=(usr etc opt)
 
 red=$'\e[31m'
@@ -52,12 +52,22 @@ find_patch() {
 	pkgbuild_patch=pkgbuild/$patch_name
 }
 
+# Arquivos novos (nao rastreados) que o patch cria na arvore, como o
+# session-watch. Fora os __pycache__ do Python.
+new_files() {
+	git ls-files --others --exclude-standard -- $(existing_dirs) |
+		grep -v '/__pycache__/'
+}
+
 tree_is_clean() {
-	git diff --quiet -- $(existing_dirs)
+	git diff --quiet -- $(existing_dirs) && [[ -z $(new_files) ]]
 }
 
 restore_tree() {
 	git checkout -q -- $(existing_dirs)
+	new_files | while IFS= read -r f; do
+		rm -f -- "$f"
+	done
 	find $(existing_dirs) -type d -name __pycache__ -exec sh -c \
 		'git ls-files --error-unmatch "$1" >/dev/null 2>&1 || rm -rf "$1"' _ {} \; -prune
 }
@@ -70,9 +80,15 @@ cmd_aplicar() {
 
 cmd_gerar() {
 	local old new tmp
+	local -a novos
 	tree_is_clean && die "a arvore nao tem mudancas; rode './gera-patch.sh aplicar' antes"
 	tmp=$(mktemp)
+	# O git diff nao ve arquivo nao rastreado: marca os novos com
+	# intent-to-add (git add -N) so para entrarem no diff, e desmarca depois.
+	mapfile -t novos < <(new_files)
+	((${#novos[@]})) && git add -N -- "${novos[@]}"
 	git diff -- $(existing_dirs) >"$tmp"
+	((${#novos[@]})) && git reset -q -- "${novos[@]}"
 	old=$(sha256sum "$pkgfile_patch" | cut -d' ' -f1)
 	new=$(sha256sum "$tmp" | cut -d' ' -f1)
 	install -m644 "$tmp" "$pkgfile_patch"
