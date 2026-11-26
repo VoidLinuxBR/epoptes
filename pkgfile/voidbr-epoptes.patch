@@ -2012,10 +2012,10 @@ index 22edcde..9c30a47 100644
      <property name="artists">Andrew Wedderburn (application icon)</property>
      <property name="logo_icon_name">epoptes</property>
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..546062e 100644
+index d54ba3b..ff727d2 100644
 --- a/usr/share/epoptes/client-functions
 +++ b/usr/share/epoptes/client-functions
-@@ -6,6 +6,115 @@
+@@ -6,6 +6,127 @@
  # Implements the client side of the epoptes communications protocol.
  # The daemon reads this file when it starts, and sends it to clients when they
  # connect. The clients actually source it and then wait for further commands.
@@ -2115,11 +2115,13 @@ index d54ba3b..546062e 100644
 +#    servidor so durante o Observar/Assistir, numa porta livre, com a senha
 +#    que o servidor do Epoptes manda (gravada no chaveiro do GNOME, onde o
 +#    gnome-remote-desktop a procura), e faz a ponte com o socat, como no
-+#    wayvnc. No fim devolve a configuracao e a senha que o usuario tinha.
++#    wayvnc. No fim devolve a configuracao que o usuario tinha.
 +#    O grdctl nao e usado: no Void (sem systemd) ele cai com falha de
 +#    segmentacao; a configuracao vai pelo gsettings e a senha pelo
-+#    secret-tool. Precisa do chaveiro destrancado. O GNOME mostra ao aluno
-+#    o indicador de tela compartilhada, com um botao de parar.
++#    secret-tool, na colecao "session" do gnome-keyring (so na memoria,
++#    sempre destrancada), e nao no chaveiro "login": assim nao pede senha
++#    nem com autologin, quando o "login" fica trancado. O GNOME mostra ao
++#    aluno o indicador de tela compartilhada, com um botao de parar.
 +#
 +# 10. wayland_alive() guarda a identidade do socket do Wayland (inode e hora,
 +#     exportada em EPOPTES_WAYLAND_ID) e falha se o socket mudar. Sem isso, depois de sair
@@ -2127,11 +2129,21 @@ index d54ba3b..546062e 100644
 +#     on_signal) e o ping passava, porque o login novo cria outro socket com
 +#     o mesmo nome; o servidor via uma sessao duplicada, presa ao ambiente da
 +#     sessao que acabou.
++#
++# 11. ensure_gnome_keyring() (nova): no login do SDDM o PAM sobe a carteira
++#     do KDE (ksecretd, pelo pam_kwallet5) e o gnome-keyring (--login), e
++#     quem pegar primeiro o servico de senhas do D-Bus
++#     (org.freedesktop.secrets) fica com ele. Quando era o ksecretd, o
++#     Observar no GNOME pedia a senha da carteira "kdewallet"; e o
++#     gnome-keyring iniciado pelo PAM no autologin nem chegava a pedir o
++#     nome. Na conexao da sessao GNOME (e de novo antes do Observar), se o
++#     dono nao for o gnome-keyring, encerra o ksecretd do usuario e sobe um
++#     gnome-keyring novo com --replace, ja no D-Bus desta sessao.
 +# ============================================================================
  
  # Dash handles signals a bit differently from bash.
  # We need to trap both 0 and 15 otherwise the trap function isn't called at all.
-@@ -20,8 +129,13 @@ on_signal() {
+@@ -20,8 +141,13 @@ on_signal() {
  
      code="$?"
      trap - 0 15
@@ -2146,7 +2158,7 @@ index d54ba3b..546062e 100644
          systemctl list-jobs | grep -q 'shutdown.target[[:space:]]*start'; then
          echo "epoptes-client got signal: $1, but system is shutting down" >&5
      else
-@@ -60,16 +174,64 @@ ensure_display() {
+@@ -60,16 +186,64 @@ ensure_display() {
      fi
  }
  
@@ -2211,7 +2223,7 @@ index d54ba3b..546062e 100644
      xprop -root -remove "$1"
  }
  
-@@ -139,14 +301,32 @@ info() {
+@@ -139,14 +313,32 @@ info() {
          else
              server_ip=$(getent hosts "$SERVER" | awk '{ print $1; exit }')
              server_ip=${server_ip:-$SERVER}
@@ -2250,7 +2262,7 @@ index d54ba3b..546062e 100644
              MAC=$(main_mac)
              MAC=${MAC%% *}
              test -n "$MAC" || die "Empty MAC"
-@@ -177,9 +357,127 @@ cpu=$CPU
+@@ -177,9 +369,170 @@ cpu=$CPU
  ram=$RAM
  vga=$VGA
  os=$OS
@@ -2296,6 +2308,49 @@ index d54ba3b..546062e 100644
 +    case ":$XDG_CURRENT_DESKTOP:" in
 +    *:GNOME:*) return 0 ;;
 +    esac
++    return 1
++}
++
++# VoidBR patch: PID de quem atende o servico de senhas do D-Bus
++# (org.freedesktop.secrets) nesta sessao, ou nada.
++secrets_owner() {
++    dbus-send --session --print-reply --dest=org.freedesktop.DBus \
++        /org/freedesktop/DBus org.freedesktop.DBus.GetConnectionUnixProcessID \
++        string:org.freedesktop.secrets 2>/dev/null | awk '/uint32/ { print $2 }'
++}
++
++# VoidBR patch: o servico de senhas e o gnome-keyring? (o comm vem cortado
++# em 15 letras: gnome-keyring-d)
++gnome_keyring_owner() {
++    local p
++
++    p=$(secrets_owner)
++    [ -n "$p" ] && [ "$(ps -o comm= -p "$p" 2>/dev/null)" = gnome-keyring-d ]
++}
++
++# VoidBR patch: garante o gnome-keyring como servico de senhas na sessao
++# GNOME. Se a carteira do KDE (ksecretd) ganhou a corrida do login, ou se o
++# gnome-keyring do PAM nao pegou o nome, encerra o ksecretd do usuario e sobe
++# um gnome-keyring novo no lugar do antigo (--replace), ja ligado ao D-Bus
++# desta sessao. Espera ate 5 s ele pegar o nome.
++ensure_gnome_keyring() {
++    local tentativa
++
++    gnome_keyring_owner && return 0
++    if ! command -v gnome-keyring-daemon >/dev/null 2>&1; then
++        echo "ensure_gnome_keyring: falta o pacote gnome-keyring no cliente" >&5
++        return 1
++    fi
++    pkill -u "$UID" -x ksecretd 2>/dev/null
++    gnome-keyring-daemon --replace --daemonize \
++        --components=pkcs11,secrets,ssh >/dev/null 2>&1
++    tentativa=0
++    while [ "$tentativa" -lt 25 ]; do
++        gnome_keyring_owner && return 0
++        tentativa=$((tentativa + 1))
++        sleep 0.2
++    done
++    echo "ensure_gnome_keyring: o gnome-keyring nao assumiu o servico de senhas (org.freedesktop.secrets)" >&5
 +    return 1
 +}
 +
@@ -2378,7 +2433,7 @@ index d54ba3b..546062e 100644
  # Execute a command in the background and optionally print its pid.
  # For internal use. Parameters:
  # [-p]   = print the pid.
-@@ -260,17 +558,27 @@ shutdown() {
+@@ -260,17 +613,27 @@ shutdown() {
  # $2 = thumbshot height.
  thumbshot() {
      # TODO: remove compatibility fallback after a few versions
@@ -2408,7 +2463,7 @@ index d54ba3b..546062e 100644
      fi
  }
  
-@@ -378,19 +686,246 @@ message() {
+@@ -378,19 +741,251 @@ message() {
      fi
  }
  
@@ -2546,10 +2601,15 @@ index d54ba3b..546062e 100644
 +# $3 = viewonly ou assist, $4 = senha.
 +gnome_vnc_session() {
 +    local grd="$1" target="$2" mode="$3" pwd="$4" schema xdg dir port gpid
-+    local antiga tentativa k v
++    local colecao tentativa k v
 +
 +    schema=org.gnome.desktop.remote-desktop.vnc
 +    xdg=org.gnome.RemoteDesktop.VncCredentials
++    # A senha vai para a colecao "session" do gnome-keyring: fica so na
++    # memoria, esta sempre destrancada e some no logout. O chaveiro "login"
++    # nao e tocado, entao nao aparece pedido de senha nem com autologin
++    # (em que o "login" fica trancado, porque o PAM nao recebe senha).
++    colecao=/org/freedesktop/secrets/collection/session
 +    dir=$(wayland_state_dir)
 +    # Dois servidores do GNOME na mesma sessao disputam o mesmo nome no
 +    # D-Bus; se o usuario ja ligou o compartilhamento de tela, desiste.
@@ -2569,18 +2629,23 @@ index d54ba3b..546062e 100644
 +        return 1
 +    fi
 +
-+    # Guarda o que o usuario tinha, para devolver no fim. O timeout evita
-+    # ficar preso para sempre se o chaveiro estiver trancado e ninguem
-+    # digitar a senha dele na tela.
++    # A senha tem que ir para o gnome-keyring: e onde o servidor VNC do
++    # GNOME a procura. Se a carteira do KDE tomou o servico de senhas depois
++    # da conexao, devolve ao gnome-keyring antes.
++    ensure_gnome_keyring || return 1
++
++    # Guarda a configuracao que o usuario tinha, para devolver no fim.
 +    for k in enable auth-method view-only; do
 +        echo "$k $(gsettings get "$schema" "$k")"
 +    done >"$dir/grd-settings"
-+    antiga=$(timeout 60 secret-tool lookup xdg:schema "$xdg" 2>/dev/null)
 +    # O gnome-remote-desktop guarda a senha como texto de um GVariant de
-+    # string, ou seja, entre aspas simples: 'senha'.
++    # string, ou seja, entre aspas simples: 'senha'. O atributo epoptes
++    # marca o item, para o clear do fim apagar so o nosso. O timeout evita
++    # ficar preso se o chaveiro nao responder.
 +    if ! printf "'%s'" "$pwd" | timeout 60 secret-tool store \
-+        --label='GNOME Remote Desktop VNC password' xdg:schema "$xdg"; then
-+        echo "gnome_vnc_session: nao consegui gravar a senha no chaveiro do GNOME (trancado?)" >&5
++        --collection="$colecao" --label='GNOME Remote Desktop VNC password' \
++        xdg:schema "$xdg" epoptes 1; then
++        echo "gnome_vnc_session: nao consegui gravar a senha no chaveiro do GNOME (gnome-keyring rodando?)" >&5
 +        rm -f "$dir/grd-settings"
 +        return 1
 +    fi
@@ -2617,12 +2682,7 @@ index d54ba3b..546062e 100644
 +        gsettings set "$schema" "$k" "$v"
 +    done <"$dir/grd-settings"
 +    rm -f "$dir/grd-settings"
-+    if [ -n "$antiga" ]; then
-+        printf '%s' "$antiga" | timeout 60 secret-tool store \
-+            --label='GNOME Remote Desktop VNC password' xdg:schema "$xdg"
-+    else
-+        timeout 60 secret-tool clear xdg:schema "$xdg"
-+    fi
++    timeout 60 secret-tool clear xdg:schema "$xdg" epoptes 1
 +}
 +
  # Connect to the server to be monitored.
@@ -2657,7 +2717,7 @@ index d54ba3b..546062e 100644
  }
  
  # Deactivate the screensaver, in order for the users to watch a broadcast.
-@@ -468,7 +1003,7 @@ receive_broadcast() {
+@@ -468,7 +1063,7 @@ receive_broadcast() {
  # The vnc clients should automatically exit when the server is killed.
  # Unfortunately, that isn't always true, so try to kill them anyway.
  stop_receptions() {
@@ -2666,7 +2726,7 @@ index d54ba3b..546062e 100644
  
      unset receiving_broadcast
      ensure_display
-@@ -477,6 +1012,14 @@ stop_receptions() {
+@@ -477,6 +1072,14 @@ stop_receptions() {
          kill "$pid"
          xprop_unset EPOPTES_VNCVIEWER_PID
      fi
@@ -2681,7 +2741,7 @@ index d54ba3b..546062e 100644
  }
  
  # Open a root terminal inside the X session.
-@@ -507,7 +1050,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
+@@ -507,7 +1110,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
  # exit automatically, so tell it to exit as soon as X is unavailable.
  ping() {
      if [ "$UID" -gt 0 ]; then
@@ -2696,7 +2756,7 @@ index d54ba3b..546062e 100644
      fi
      if [ "$receiving_broadcast" = true ]; then
          reset_screensaver
-@@ -533,6 +1082,23 @@ info
+@@ -533,6 +1142,29 @@ info
  # Prevent dbus from getting autolaunched (issue #66)
  export "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/dev/null}"
  
@@ -2715,6 +2775,12 @@ index d54ba3b..546062e 100644
 +# depois do logout (com o ambiente da sessao que acabou) encerra ja aqui.
 +if [ "$UID" -gt 0 ] && [ -n "$WAYLAND_DISPLAY" ]; then
 +    wayland_alive || die "No Wayland (sessao encerrada ou de outro login)"
++fi
++
++# VoidBR patch: na sessao GNOME, deixa o gnome-keyring como servico de
++# senhas desde a conexao (ver ensure_gnome_keyring).
++if [ "$UID" -gt 0 ] && gnome_session; then
++    ensure_gnome_keyring
 +fi
 +
  for i in 0 15; do

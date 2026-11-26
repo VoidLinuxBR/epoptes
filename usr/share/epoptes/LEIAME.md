@@ -214,15 +214,22 @@ O que o aluno vê: enquanto a tela é vista, o GNOME mostra um botão laranja no
 
 ### O chaveiro do GNOME
 
-O Observar/Assistir depende do chaveiro (gnome-keyring) estar rodando e destrancado, porque é nele que a senha do VNC fica.
+O Observar/Assistir precisa do chaveiro do GNOME (gnome-keyring) rodando, porque é nele que o servidor VNC do GNOME procura a senha.
 
-- O chaveiro destranca sozinho no login quando tem a **mesma senha do usuário**. É o normal numa instalação nova.
-- Se ele ficou com outra senha (por exemplo, depois de trocar a senha do usuário), aparece na tela do aluno o pedido "Authentication required" para destrancá-lo, e o Observar espera até 60 segundos antes de desistir. Para não acontecer de novo: no pedido, digite a senha do chaveiro e marque **"Automatically unlock this keyring whenever I'm logged in"**; ou, se ninguém lembra a senha dele, recrie o chaveiro:
+- A senha do Observar/Assistir vai para a coleção **session** do chaveiro: ela fica só na memória, está sempre destrancada e some quando o aluno sai da sessão. O chaveiro "login" não é usado, então o Observar não pede senha nenhuma, nem quando o chaveiro "login" está trancado.
+- Isso vale também para clientes com **autologin** no SDDM. Neles o chaveiro "login" fica trancado (o PAM não recebe a senha do usuário), e outros programas que guardam senha nele (Wi-Fi, navegador...) continuam pedindo para destrancá-lo; o Epoptes não.
+- Se a máquina também tiver a carteira do KDE (kwallet), o PAM do SDDM a inicia no login (o ksecretd, pelo pam_kwallet5), e ela pode ficar com o serviço de senhas no lugar do chaveiro do GNOME. Aí aparecia ao aluno o pedido da senha da carteira "kdewallet". O cliente corrige isso sozinho: logo que a conexão da sessão GNOME sobe, e de novo antes de cada Observar/Assistir, ele confere quem atende o serviço de senhas e, se não for o gnome-keyring, encerra o ksecretd do usuário e sobe um gnome-keyring novo no lugar.
+- Para a carteira do KDE nem subir nos clientes que só usam GNOME, tire do PAM do SDDM as linhas do pam_kwallet5, em **/etc/pam.d/sddm** e **/etc/pam.d/sddm-autologin**:
 
-        mv ~/.local/share/keyrings ~/.local/share/keyrings.antigo
+        sudo sed -i '/pam_kwallet5\.so/d' /etc/pam.d/sddm /etc/pam.d/sddm-autologin
 
-  e saia e entre de novo na sessão. O GNOME cria um chaveiro novo com a senha do login, já destrancado. Isso apaga as senhas guardadas no chaveiro antigo (de Wi-Fi, navegador...); a pasta antiga fica guardada.
-- Se a máquina também tiver a carteira do KDE (kwallet) e o chaveiro do GNOME não estiver rodando, quem responde pode ser a carteira do KDE, pedindo a senha de uma carteira "kdewallet". Nesse caso, cancele e saia e entre de novo no GNOME, para o chaveiro dele subir.
+  Não faça isso se a mesma máquina também tiver o KDE Plasma: ele usa essas linhas para abrir a carteira no login.
+- Para conferir quem atende o serviço de senhas, na sessão do aluno:
+
+        dbus-send --session --print-reply --dest=org.freedesktop.DBus /org/freedesktop/DBus \
+          org.freedesktop.DBus.GetConnectionUnixProcessID string:org.freedesktop.secrets
+
+  e veja com `ps -p <PID>` se é o gnome-keyring-daemon.
 
 ### Outros cuidados
 
