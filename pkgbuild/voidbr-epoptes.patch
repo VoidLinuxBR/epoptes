@@ -83,7 +83,7 @@ index ac7b570..848abb8 100755
      path = os.path.expanduser('~/.config')
      if not os.path.isdir(path):
 diff --git a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-index 720c958..69f5a16 100644
+index 720c958..90f4cf4 100644
 --- a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 +++ b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 @@ -4,10 +4,61 @@
@@ -167,8 +167,14 @@ index 720c958..69f5a16 100644
  
  
  class EpoptesGui(object):
-@@ -79,6 +133,11 @@ class EpoptesGui(object):
+@@ -77,8 +131,17 @@ class EpoptesGui(object):
+         self.vncserver = None
+         self.vncserver_port = None
          self.vncserver_pwd = None
++        # VoidBR patch: alunos que estao recebendo a transmissao da tela
++        # (para parar so nos selecionados e desligar o servidor da
++        # transmissao quando o ultimo parar)
++        self.broadcast_receivers = set()
          self.vncviewer = None
          self.vncviewer_port = None
 +        # VoidBR patch: o info de cada conexao (handle -> dict) e os usuarios
@@ -179,7 +185,7 @@ index 720c958..69f5a16 100644
  
          self.builder = Gtk.Builder()
          self.builder.add_from_file('epoptes.ui')
-@@ -98,7 +157,11 @@ class EpoptesGui(object):
+@@ -98,7 +161,11 @@ class EpoptesGui(object):
          self.set_labels_order(1, 0, None)
          self.icv_clients.set_model(self.cstore)
          self.icv_clients.set_pixbuf_column(C_PIXBUF)
@@ -192,7 +198,7 @@ index 720c958..69f5a16 100644
          self.cstore.set_sort_column_id(C_LABEL, Gtk.SortType.ASCENDING)
          self.on_icv_clients_selection_changed(None)
          self.icv_clients.enable_model_drag_source(
-@@ -167,6 +230,14 @@ class EpoptesGui(object):
+@@ -167,6 +234,14 @@ class EpoptesGui(object):
          mitem.set_active(True)
          self.get('cmi_show_real_names').set_active(self.show_real_names)
          self.mainwin.set_sensitive(False)
@@ -207,7 +213,7 @@ index 720c958..69f5a16 100644
  
      def save_settings(self):
          """Helper function for on_imi_file_quit_activate."""
-@@ -187,8 +258,7 @@ class EpoptesGui(object):
+@@ -187,8 +262,7 @@ class EpoptesGui(object):
      def on_imi_file_quit_activate(self, _widget):
          """Handle imi_file_quit.activate and wnd_main.destroy events."""
          self.save_settings()
@@ -217,7 +223,7 @@ index 720c958..69f5a16 100644
          if self.vncviewer is not None:
              self.vncviewer.kill()
          # noinspection PyUnresolvedReferences
-@@ -276,38 +346,86 @@ class EpoptesGui(object):
+@@ -276,38 +350,86 @@ class EpoptesGui(object):
  
      def reverse_connection(self, cmd, *args):
          """Helper function for on_imi_broadcasts_*_activate."""
@@ -334,7 +340,7 @@ index 720c958..69f5a16 100644
  
      def on_imi_broadcasts_monitor_user_activate(self, _widget):
          """Handle imi_sbroadcasts_monitor_user.activate event."""
-@@ -323,6 +441,9 @@ class EpoptesGui(object):
+@@ -323,6 +445,9 @@ class EpoptesGui(object):
  
      def broadcast_screen(self, fullscreen=''):
          """Helper function for on_imi_broadcasts_broadcast_screen*_activate."""
@@ -344,7 +350,7 @@ index 720c958..69f5a16 100644
          if self.vncserver is None:
              pwdfile = config.expand_filename('vncpasswd')
              pwd = ''.join(random.sample(
-@@ -332,11 +453,18 @@ class EpoptesGui(object):
+@@ -332,11 +457,18 @@ class EpoptesGui(object):
                  pwd = file.read()
              self.vncserver_port = self.find_unused_port()
              self.vncserver_pwd = ''.join('\\%o' % c for c in pwd)
@@ -368,10 +374,14 @@ index 720c958..69f5a16 100644
          # Running `xdg-screensaver reset` as root doesn't reset the D.E.
          # screensaver, so send the reset command to both epoptes processes
          self.exec_on_selected_clients(
-@@ -345,6 +473,63 @@ class EpoptesGui(object):
+@@ -344,6 +476,66 @@ class EpoptesGui(object):
+         self.exec_on_selected_clients(
              'receive_broadcast "${GUI_IP}:%d" "%s" %s' % (self.vncserver_port,
              self.vncserver_pwd, fullscreen), mode=EM_SYSTEM_OR_SESSION)
- 
++        # VoidBR patch: guarda quem recebe (os selecionados, ou todos)
++        alvos = self.get_selected_clients() or self.cstore
++        self.broadcast_receivers.update(row[C_INSTANCE] for row in alvos)
++
 +    # VoidBR patch: transmitir a tela com o servidor numa sessao Wayland.
 +    def start_wayland_broadcast(self, pwdfile):
 +        """Start broadcast-wayland and wait until it listens; on failure,
@@ -428,22 +438,41 @@ index 720c958..69f5a16 100644
 +        except subprocess.TimeoutExpired:
 +            self.vncserver.kill()
 +        self.vncserver = None
-+
+ 
      def on_imi_broadcasts_broadcast_screen_fullscreen_activate(self, _widget):
          """Handle imi_broadcasts_broadcast_screen_fullscreen.activate event."""
-         self.broadcast_screen('true')
-@@ -357,9 +542,7 @@ class EpoptesGui(object):
+@@ -357,9 +549,27 @@ class EpoptesGui(object):
          """Handle imi_broadcasts_stop_broadcasts.activate event."""
          self.exec_on_clients(['stop_receptions'], self.cstore,
                               mode=EM_SYSTEM_AND_SESSION)
 -        if self.vncserver is not None:
 -            self.vncserver.kill()
 -            self.vncserver = None
++        self.broadcast_receivers.clear()
 +        self.stop_vncserver()
++
++    # VoidBR patch: parar so nos alunos selecionados.
++    def on_imi_broadcasts_stop_selected_activate(self, _widget):
++        """Stop the broadcasts only on the selected clients; turn the
++        broadcast server off when nobody else is receiving."""
++        selecionados = self.get_selected_clients()
++        if not selecionados:
++            self.warning_dialog(
++                'Selecione os alunos em que a transmiss\u00e3o deve parar.')
++            return
++        self.exec_on_clients(['stop_receptions'], selecionados,
++                             mode=EM_SYSTEM_AND_SESSION)
++        self.broadcast_receivers.difference_update(
++            row[C_INSTANCE] for row in selecionados)
++        # Quem saiu do Epoptes (desligou, deslogou) tambem nao recebe mais
++        presentes = {row[C_INSTANCE] for row in self.cstore}
++        self.broadcast_receivers &= presentes
++        if not self.broadcast_receivers:
++            self.stop_vncserver()
  
      # TODO: Should we allow for running arbitrary commands in clients?
      def on_imi_execute_execute_command_activate(self, _widget):
-@@ -504,6 +687,100 @@ class EpoptesGui(object):
+@@ -504,6 +714,100 @@ class EpoptesGui(object):
          subprocess.Popen('./remote_assistance.py',
                           cwd='/usr/share/epoptes-client')
  
@@ -544,7 +573,7 @@ index 720c958..69f5a16 100644
      def on_imi_help_about_activate(self, _widget):
          """Handle imi_help_about_activate.activate event."""
          if not self.about:
-@@ -629,6 +906,12 @@ class EpoptesGui(object):
+@@ -629,6 +933,12 @@ class EpoptesGui(object):
              single_client = True
          self.get('imi_clients_information').set_sensitive(single_client)
          self.get('tlb_clients_information').set_sensitive(single_client)
@@ -557,7 +586,7 @@ index 720c958..69f5a16 100644
  
          if selected:
              self.get('mni_add_to_group').set_sensitive(True)
-@@ -764,6 +1047,9 @@ class EpoptesGui(object):
+@@ -764,6 +1074,9 @@ class EpoptesGui(object):
                  client_.set_offline()
  
          LOG.w("Disconnect from", handle)
@@ -567,7 +596,7 @@ index 720c958..69f5a16 100644
          client = None
          for client in structs.clients:
              if client.hsystem == handle:
-@@ -813,12 +1099,12 @@ class EpoptesGui(object):
+@@ -813,12 +1126,12 @@ class EpoptesGui(object):
          if client.users:
              for hsession, user in client.users.items():
                  self.cstore.append(
@@ -582,7 +611,7 @@ index 720c958..69f5a16 100644
                   self.imagetypes[client.type], client, ''])
  
      def fill_icon_view(self, group, keep_selection=False):
-@@ -923,9 +1209,11 @@ class EpoptesGui(object):
+@@ -923,9 +1236,11 @@ class EpoptesGui(object):
  
          # Update/fill the client information
          client.type, client.hostname = type_, host
@@ -594,7 +623,7 @@ index 720c958..69f5a16 100644
          else:
              # This is a user epoptes-client
              client.add_user(user, name, handle)
-@@ -949,7 +1237,711 @@ class EpoptesGui(object):
+@@ -949,7 +1264,711 @@ class EpoptesGui(object):
              user = row[C_INSTANCE].users[row[C_SESSION_HANDLE]][label]
          else:
              user = ''
@@ -1307,7 +1336,7 @@ index 720c958..69f5a16 100644
  
      def calculate_label(self, client, username=''):
          """Return the iconview label from a hostname/alias and a username,
-@@ -1000,6 +1992,21 @@ class EpoptesGui(object):
+@@ -1000,6 +2019,21 @@ class EpoptesGui(object):
              del self.current_thumbshots[handle]
          return False
  
@@ -1329,7 +1358,7 @@ index 720c958..69f5a16 100644
      def got_thumbshot(self, handle, reply):
          """Callback after running`thumbshot` on a client."""
          for i in self.cstore:
-@@ -1007,11 +2014,21 @@ class EpoptesGui(object):
+@@ -1007,11 +2041,21 @@ class EpoptesGui(object):
                  # Ask for a new thumbshot THUMBSHOT_MS msec after the last one.
                  # So if the client is too stressed and needs e.g. 7 secs to
                  # send a thumbshot, we'll ask for one every 12 secs.
@@ -1352,7 +1381,7 @@ index 720c958..69f5a16 100644
                  try:
                      rowstride, size, pixels = reply.split(b'\n', 2)
                      rowstride = int(rowstride)
-@@ -1059,7 +2076,7 @@ class EpoptesGui(object):
+@@ -1059,7 +2103,7 @@ class EpoptesGui(object):
          # ${GUI_PY} must be unquoted, don't pass it as list
          if isinstance(command, list) and len(command) > 0:
              command = '%s %s' % (command[0], ' '.join(
@@ -3252,7 +3281,7 @@ index d54ba3b..07f8234 100644
      trap "on_signal $i" $i
  done
 diff --git a/usr/share/epoptes/epoptes.ui b/usr/share/epoptes/epoptes.ui
-index 5840773..e33e2de 100644
+index 5840773..c411a6c 100644
 --- a/usr/share/epoptes/epoptes.ui
 +++ b/usr/share/epoptes/epoptes.ui
 @@ -169,6 +169,31 @@
@@ -3287,7 +3316,24 @@ index 5840773..e33e2de 100644
    <object class="GtkImage" id="img_tlb_clients_information">
      <property name="visible">True</property>
      <property name="can_focus">False</property>
-@@ -720,6 +745,47 @@
+@@ -485,6 +510,16 @@
+                                 <signal name="activate" handler="on_imi_broadcasts_stop_broadcasts_activate" swapped="no"/>
+                               </object>
+                             </child>
++                            <child>
++                              <object class="GtkMenuItem" id="imi_broadcasts_stop_selected">
++                                <property name="visible">True</property>
++                                <property name="can_focus">False</property>
++                                <property name="tooltip_text">Parar as transmissões só nos alunos selecionados; nos outros a transmissão continua</property>
++                                <property name="label">Parar transmissões só nos _selecionados</property>
++                                <property name="use_underline">True</property>
++                                <signal name="activate" handler="on_imi_broadcasts_stop_selected_activate" swapped="no"/>
++                              </object>
++                            </child>
+                             <child>
+                               <object class="GtkImageMenuItem" id="imi_broadcasts_open_broadcasts_window">
+                                 <property name="label" translatable="yes">Open broadcasts window</property>
+@@ -720,6 +755,47 @@
                          <signal name="activate" handler="on_imi_clients_information_activate" swapped="no"/>
                        </object>
                      </child>
@@ -3335,7 +3381,7 @@ index 5840773..e33e2de 100644
                    </object>
                  </child>
                </object>
-@@ -734,6 +800,21 @@
+@@ -734,6 +810,21 @@
                    <object class="GtkMenu">
                      <property name="visible">True</property>
                      <property name="can_focus">False</property>
@@ -3357,7 +3403,7 @@ index 5840773..e33e2de 100644
                      <child>
                        <object class="GtkImageMenuItem" id="imi_help_home">
                          <property name="label">gtk-home</property>
-@@ -828,68 +909,203 @@
+@@ -828,68 +919,229 @@
            </packing>
          </child>
          <child>
@@ -3567,18 +3613,44 @@ index 5840773..e33e2de 100644
 +                        </packing>
 +                      </child>
 +                      <child>
-+                        <object class="GtkToolButton" id="tlb_broadcasts_stop_broadcasts">
++                        <object class="GtkMenuToolButton" id="tlb_broadcasts_stop_broadcasts">
 +                          <property name="visible">True</property>
 +                          <property name="can_focus">False</property>
-+                          <property name="tooltip_text" translatable="yes">Stop all broadcasts on every client</property>
++                          <property name="tooltip_text">Parar todas as transmissões em todos os alunos (a seta ao lado tem a opção de parar só nos selecionados)</property>
 +                          <property name="label" translatable="yes">Stop broadcasts</property>
 +                          <property name="use_underline">True</property>
 +                          <property name="icon_widget">img_tlb_broadcasts_stop_broadcast</property>
 +                          <signal name="clicked" handler="on_imi_broadcasts_stop_broadcasts_activate" swapped="no"/>
++                          <child type="menu">
++                            <object class="GtkMenu">
++                              <property name="visible">True</property>
++                              <property name="can_focus">False</property>
++                              <child>
++                                <object class="GtkMenuItem" id="tlb_broadcasts_stop_all">
++                                  <property name="visible">True</property>
++                                  <property name="can_focus">False</property>
++                                  <property name="tooltip_text">Parar as transmissões em todos os alunos</property>
++                                  <property name="label">Parar em _todos os alunos</property>
++                                  <property name="use_underline">True</property>
++                                  <signal name="activate" handler="on_imi_broadcasts_stop_broadcasts_activate" swapped="no"/>
++                                </object>
++                              </child>
++                              <child>
++                                <object class="GtkMenuItem" id="tlb_broadcasts_stop_selected">
++                                  <property name="visible">True</property>
++                                  <property name="can_focus">False</property>
++                                  <property name="tooltip_text">Parar as transmissões só nos alunos selecionados; nos outros a transmissão continua</property>
++                                  <property name="label">Parar só nos _selecionados</property>
++                                  <property name="use_underline">True</property>
++                                  <signal name="activate" handler="on_imi_broadcasts_stop_selected_activate" swapped="no"/>
++                                </object>
++                              </child>
++                            </object>
++                          </child>
 +                        </object>
 +                        <packing>
 +                          <property name="expand">False</property>
-+                          <property name="homogeneous">True</property>
++                          <property name="homogeneous">False</property>
 +                        </packing>
 +                      </child>
 +                      </object>
@@ -3598,7 +3670,7 @@ index 5840773..e33e2de 100644
                </packing>
              </child>
              <child>
-@@ -903,52 +1119,89 @@
+@@ -903,52 +1155,89 @@
                </packing>
              </child>
              <child>
@@ -3721,7 +3793,7 @@ index 5840773..e33e2de 100644
                      </child>
                    </object>
                  </child>
-@@ -958,21 +1211,6 @@
+@@ -958,21 +1247,6 @@
                  <property name="homogeneous">False</property>
                </packing>
              </child>
@@ -3743,7 +3815,7 @@ index 5840773..e33e2de 100644
              <child>
                <object class="GtkSeparatorToolItem">
                  <property name="visible">True</property>
-@@ -984,39 +1222,180 @@
+@@ -984,39 +1258,180 @@
                </packing>
              </child>
              <child>
@@ -3939,7 +4011,7 @@ index 5840773..e33e2de 100644
                </object>
                <packing>
                  <property name="expand">False</property>
-@@ -1024,33 +1403,121 @@
+@@ -1024,33 +1439,121 @@
                </packing>
              </child>
              <child>
@@ -4075,7 +4147,7 @@ index 5840773..e33e2de 100644
                </packing>
              </child>
              <child>
-@@ -1064,18 +1531,66 @@
+@@ -1064,18 +1567,66 @@
                </packing>
              </child>
              <child>
