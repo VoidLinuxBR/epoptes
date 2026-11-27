@@ -83,7 +83,7 @@ index ac7b570..848abb8 100755
      path = os.path.expanduser('~/.config')
      if not os.path.isdir(path):
 diff --git a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-index 720c958..c29ab57 100644
+index 720c958..c89ff21 100644
 --- a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 +++ b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 @@ -4,10 +4,61 @@
@@ -475,7 +475,7 @@ index 720c958..c29ab57 100644
          else:
              # This is a user epoptes-client
              client.add_user(user, name, handle)
-@@ -949,7 +1173,702 @@ class EpoptesGui(object):
+@@ -949,7 +1173,711 @@ class EpoptesGui(object):
              user = row[C_INSTANCE].users[row[C_SESSION_HANDLE]][label]
          else:
              user = ''
@@ -484,40 +484,48 @@ index 720c958..c29ab57 100644
 +
 +    # VoidBR patch: zoom da fonte, como nos voidbr-*-tweaks.
 +    def setup_font_zoom(self):
-+        """Add the A-/100%/A+ buttons and the Ctrl +/-/0 shortcuts."""
++        """Add the font size items to the Settings menu and the Ctrl +/-/0
++        shortcuts."""
 +        self.css_fonte = Gtk.CssProvider()
 +        Gtk.StyleContext.add_provider_for_screen(
 +            Gdk.Screen.get_default(), self.css_fonte,
 +            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
++        # VoidBR patch: grupos da barra - separador visivel entre eles, nome
++        # pequeno em cima de cada um, e as barras de dentro sem fundo nem
++        # borda (para parecerem uma barra so).
++        css_barra = Gtk.CssProvider()
++        css_barra.load_from_data(b'''
++            toolbar.epoptes-principal > separator {
++                min-width: 1px; margin: 6px 6px;
++                background-color: alpha(currentColor, 0.35); }
++            toolbar.epoptes-grupo {
++                padding: 0; border: none; background: none; box-shadow: none; }
++            label.epoptes-grupo-nome {
++                font-size: 0.72em; opacity: 0.7; margin-top: 2px; }
++        ''')
++        Gtk.StyleContext.add_provider_for_screen(
++            Gdk.Screen.get_default(), css_barra,
++            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 +        try:
 +            self.escala_fonte = min(ESCALA_MAX, max(ESCALA_MIN, float(
 +                config.settings.get('GUI', 'font_scale', fallback='1.0'))))
 +        except ValueError:
 +            self.escala_fonte = 1.0
-+        toolbar = self.get('tlb_clients_information').get_parent()
-+        # Separador invisivel que expande: empurra os botoes para a direita
-+        sep = Gtk.SeparatorToolItem(draw=False)
-+        sep.set_expand(True)
-+        toolbar.insert(sep, -1)
-+        caixa = Gtk.Box()
-+        caixa.get_style_context().add_class('linked')
-+        self.b_menor = Gtk.Button(label='A\u2212',
-+                                  tooltip_text='Diminuir a fonte (Ctrl -)')
-+        self.b_escala = Gtk.Button(label='100%',
-+                                   tooltip_text='Tamanho normal (Ctrl 0)')
-+        self.b_maior = Gtk.Button(label='A+',
-+                                  tooltip_text='Aumentar a fonte (Ctrl +)')
-+        for btn, passo in ((self.b_menor, -1), (self.b_escala, 0),
-+                           (self.b_maior, 1)):
-+            btn.set_relief(Gtk.ReliefStyle.NONE)
-+            btn.set_valign(Gtk.Align.CENTER)
-+            btn.connect('clicked', lambda _b, p=passo: self.mudar_fonte(p))
-+            caixa.pack_start(btn, False, False, 0)
-+        item = Gtk.ToolItem()
-+        item.add(caixa)
-+        toolbar.insert(item, -1)
-+        sep.show()
-+        item.show_all()
++        # O tamanho da fonte fica no menu Configuracoes (a barra e para o
++        # que se usa toda hora). O teclado continua: Ctrl +, Ctrl - e Ctrl 0
++        # (on_font_zoom_key); o menu so mostra os atalhos ao lado.
++        menu = self.get('imi_settings').get_parent()
++        menu.append(Gtk.SeparatorMenuItem())
++        self.mi_maior = Gtk.MenuItem.new_with_mnemonic('_Aumentar fonte')
++        self.mi_menor = Gtk.MenuItem.new_with_mnemonic('_Diminuir fonte')
++        self.mi_normal = Gtk.MenuItem.new_with_mnemonic('Tamanho _normal')
++        for item, passo, tecla in ((self.mi_maior, 1, Gdk.KEY_plus),
++                                   (self.mi_menor, -1, Gdk.KEY_minus),
++                                   (self.mi_normal, 0, Gdk.KEY_0)):
++            item.connect('activate', lambda _i, p=passo: self.mudar_fonte(p))
++            item.get_child().set_accel(tecla, Gdk.ModifierType.CONTROL_MASK)
++            menu.append(item)
++        menu.show_all()
 +        self.mainwin.connect('key-press-event', self.on_font_zoom_key)
 +        self.icones_zoom = self.find_zoom_icons()
 +        # Imagens de tema (stock/icon_name) de qualquer janela: original de
@@ -679,9 +687,10 @@ index 720c958..c29ab57 100644
 +        self.aplicar_icones(escala)
 +        for janela in Gtk.Window.list_toplevels():
 +            janela.queue_resize()
-+        self.b_escala.set_label('%d%%' % round(escala * 100))
-+        self.b_menor.set_sensitive(escala > ESCALA_MIN + 0.001)
-+        self.b_maior.set_sensitive(escala < ESCALA_MAX - 0.001)
++        self.mi_normal.get_child().set_text_with_mnemonic(
++            'Tamanho _normal (agora %d%%)' % round(escala * 100))
++        self.mi_menor.set_sensitive(escala > ESCALA_MIN + 0.001)
++        self.mi_maior.set_sensitive(escala < ESCALA_MAX - 0.001)
 +
 +    def mudar_fonte(self, passo):
 +        """Change the font scale by passo*10%, or reset it if passo is 0."""
@@ -1179,7 +1188,7 @@ index 720c958..c29ab57 100644
  
      def calculate_label(self, client, username=''):
          """Return the iconview label from a hostname/alias and a username,
-@@ -1000,6 +1919,21 @@ class EpoptesGui(object):
+@@ -1000,6 +1928,21 @@ class EpoptesGui(object):
              del self.current_thumbshots[handle]
          return False
  
@@ -1201,7 +1210,7 @@ index 720c958..c29ab57 100644
      def got_thumbshot(self, handle, reply):
          """Callback after running`thumbshot` on a client."""
          for i in self.cstore:
-@@ -1007,11 +1941,21 @@ class EpoptesGui(object):
+@@ -1007,11 +1950,21 @@ class EpoptesGui(object):
                  # Ask for a new thumbshot THUMBSHOT_MS msec after the last one.
                  # So if the client is too stressed and needs e.g. 7 secs to
                  # send a thumbshot, we'll ask for one every 12 secs.
@@ -1224,7 +1233,7 @@ index 720c958..c29ab57 100644
                  try:
                      rowstride, size, pixels = reply.split(b'\n', 2)
                      rowstride = int(rowstride)
-@@ -1059,7 +2003,7 @@ class EpoptesGui(object):
+@@ -1059,7 +2012,7 @@ class EpoptesGui(object):
          # ${GUI_PY} must be unquoted, don't pass it as list
          if isinstance(command, list) and len(command) > 0:
              command = '%s %s' % (command[0], ' '.join(
@@ -2941,7 +2950,7 @@ index d54ba3b..07f8234 100644
      trap "on_signal $i" $i
  done
 diff --git a/usr/share/epoptes/epoptes.ui b/usr/share/epoptes/epoptes.ui
-index 5840773..f43de39 100644
+index 5840773..e33e2de 100644
 --- a/usr/share/epoptes/epoptes.ui
 +++ b/usr/share/epoptes/epoptes.ui
 @@ -169,6 +169,31 @@
@@ -3046,30 +3055,35 @@ index 5840773..f43de39 100644
                      <child>
                        <object class="GtkImageMenuItem" id="imi_help_home">
                          <property name="label">gtk-home</property>
-@@ -833,14 +914,14 @@
+@@ -828,68 +909,203 @@
+           </packing>
+         </child>
+         <child>
+-          <object class="GtkToolbar">
++          <object class="GtkToolbar" id="tlb_principal">
+             <property name="visible">True</property>
              <property name="can_focus">False</property>
              <property name="toolbar_style">icons</property>
++            <style>
++              <class name="epoptes-principal"/>
++            </style>
              <child>
 -              <object class="GtkToolButton" id="tlb_session_boot">
-+              <object class="GtkToolButton" id="tlb_broadcasts_monitor_user">
++              <object class="GtkToolItem" id="tli_grupo_0">
                  <property name="visible">True</property>
                  <property name="can_focus">False</property>
 -                <property name="tooltip_text" translatable="yes">Boot selected clients (Wake On LAN)</property>
 -                <property name="label" translatable="yes">Boot</property>
-+                <property name="tooltip_text">Observar a tela do usuário selecionado</property>
-+                <property name="label">Observar a tela do usuário selecionado</property>
-                 <property name="use_underline">True</property>
+-                <property name="use_underline">True</property>
 -                <property name="icon_widget">img_tlb_session_boot</property>
 -                <signal name="clicked" handler="on_imi_session_boot_activate" swapped="no"/>
-+                <property name="icon_widget">img_tlb_broadcasts_monitor_user</property>
-+                <signal name="clicked" handler="on_imi_broadcasts_monitor_user_activate" swapped="no"/>
-               </object>
-               <packing>
-                 <property name="expand">False</property>
-@@ -848,44 +929,14 @@
-               </packing>
-             </child>
-             <child>
+-              </object>
+-              <packing>
+-                <property name="expand">False</property>
+-                <property name="homogeneous">True</property>
+-              </packing>
+-            </child>
+-            <child>
 -              <object class="GtkToolButton" id="tlb_session_logout">
 -                <property name="visible">True</property>
 -                <property name="can_focus">False</property>
@@ -3078,52 +3092,218 @@ index 5840773..f43de39 100644
 -                <property name="use_underline">True</property>
 -                <property name="icon_widget">img_tlb_session_logout</property>
 -                <signal name="clicked" handler="on_imi_session_logout_activate" swapped="no"/>
--              </object>
--              <packing>
--                <property name="expand">False</property>
++                <child>
++                  <object class="GtkBox">
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <property name="orientation">vertical</property>
++                    <child>
++                      <object class="GtkLabel">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">Ver o aluno</property>
++                        <style>
++                          <class name="epoptes-grupo-nome"/>
++                        </style>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">0</property>
++                      </packing>
++                    </child>
++                    <child>
++                      <object class="GtkToolbar">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="toolbar_style">icons</property>
++                        <property name="show_arrow">False</property>
++                        <style>
++                          <class name="epoptes-grupo"/>
++                        </style>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_broadcasts_monitor_user">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text">Observar a tela do usuário selecionado</property>
++                          <property name="label">Observar a tela do usuário selecionado</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_broadcasts_monitor_user</property>
++                          <signal name="clicked" handler="on_imi_broadcasts_monitor_user_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_broadcasts_assist_user">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Take control of the selected user's computer</property>
++                          <property name="label" translatable="yes">Assist user</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_broadcasts_assist_user</property>
++                          <signal name="clicked" handler="on_imi_broadcasts_assist_user_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">1</property>
++                      </packing>
++                    </child>
++                  </object>
++                </child>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
 -                <property name="homogeneous">True</property>
--              </packing>
--            </child>
--            <child>
++                <property name="homogeneous">False</property>
+               </packing>
+             </child>
+             <child>
 -              <object class="GtkToolButton" id="tlb_session_reboot">
--                <property name="visible">True</property>
--                <property name="can_focus">False</property>
++              <object class="GtkSeparatorToolItem">
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
 -                <property name="tooltip_text" translatable="yes">Reboot the selected clients</property>
 -                <property name="label" translatable="yes">Reboot</property>
 -                <property name="use_underline">True</property>
 -                <property name="icon_widget">img_tlb_session_reboot</property>
 -                <signal name="clicked" handler="on_imi_session_reboot_activate" swapped="no"/>
--              </object>
--              <packing>
--                <property name="expand">False</property>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
 -                <property name="homogeneous">True</property>
--              </packing>
--            </child>
--            <child>
++                <property name="homogeneous">False</property>
+               </packing>
+             </child>
+             <child>
 -              <object class="GtkToolButton" id="tlb_session_shutdown">
-+              <object class="GtkToolButton" id="tlb_broadcasts_assist_user">
++              <object class="GtkToolItem" id="tli_grupo_1">
                  <property name="visible">True</property>
                  <property name="can_focus">False</property>
 -                <property name="tooltip_text" translatable="yes">Shutdown the selected clients</property>
 -                <property name="label" translatable="yes">Shutdown</property>
-+                <property name="tooltip_text" translatable="yes">Take control of the selected user's computer</property>
-+                <property name="label" translatable="yes">Assist user</property>
-                 <property name="use_underline">True</property>
+-                <property name="use_underline">True</property>
 -                <property name="icon_widget">img_tlb_session_shutdown</property>
 -                <signal name="clicked" handler="on_imi_session_shutdown_activate" swapped="no"/>
-+                <property name="icon_widget">img_tlb_broadcasts_assist_user</property>
-+                <signal name="clicked" handler="on_imi_broadcasts_assist_user_activate" swapped="no"/>
++                <child>
++                  <object class="GtkBox">
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <property name="orientation">vertical</property>
++                    <child>
++                      <object class="GtkLabel">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">Transmitir</property>
++                        <style>
++                          <class name="epoptes-grupo-nome"/>
++                        </style>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">0</property>
++                      </packing>
++                    </child>
++                    <child>
++                      <object class="GtkToolbar">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="toolbar_style">icons</property>
++                        <property name="show_arrow">False</property>
++                        <style>
++                          <class name="epoptes-grupo"/>
++                        </style>
++                      <child>
++                        <object class="GtkMenuToolButton" id="tlb_broadcasts_broadcast_screen">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Broadcast your screen to the selected clients</property>
++                          <property name="label" translatable="yes">Broadcast screen</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_broadcasts_broadcast_screen</property>
++                          <signal name="clicked" handler="on_imi_broadcasts_broadcast_screen_fullscreen_activate" swapped="no"/>
++                          <child type="menu">
++                            <object class="GtkMenu">
++                              <property name="visible">True</property>
++                              <property name="can_focus">False</property>
++                              <child>
++                                <object class="GtkMenuItem" id="tlb_broadcasts_broadcast_screen_fullscreen">
++                                  <property name="visible">True</property>
++                                  <property name="can_focus">False</property>
++                                  <property name="tooltip_text" translatable="yes">Broadcast your screen to the selected clients, fullscreen</property>
++                                  <property name="label" translatable="yes">Broadcast screen (fullscreen)</property>
++                                  <property name="use_underline">True</property>
++                                  <signal name="activate" handler="on_imi_broadcasts_broadcast_screen_fullscreen_activate" swapped="no"/>
++                                </object>
++                              </child>
++                              <child>
++                                <object class="GtkMenuItem" id="tlb_broadcasts_broadcast_screen_windowed">
++                                  <property name="visible">True</property>
++                                  <property name="can_focus">False</property>
++                                  <property name="tooltip_text" translatable="yes">Broadcast your screen to the selected clients, in a window</property>
++                                  <property name="label" translatable="yes">Broadcast screen (windowed)</property>
++                                  <property name="use_underline">True</property>
++                                  <signal name="activate" handler="on_imi_broadcasts_broadcast_screen_windowed_activate" swapped="no"/>
++                                </object>
++                              </child>
++                            </object>
++                          </child>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">False</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_broadcasts_stop_broadcasts">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Stop all broadcasts on every client</property>
++                          <property name="label" translatable="yes">Stop broadcasts</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_broadcasts_stop_broadcast</property>
++                          <signal name="clicked" handler="on_imi_broadcasts_stop_broadcasts_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">1</property>
++                      </packing>
++                    </child>
++                  </object>
++                </child>
                </object>
                <packing>
                  <property name="expand">False</property>
-@@ -902,21 +953,6 @@
-                 <property name="homogeneous">False</property>
+-                <property name="homogeneous">True</property>
++                <property name="homogeneous">False</property>
                </packing>
              </child>
--            <child>
+             <child>
+@@ -903,52 +1119,89 @@
+               </packing>
+             </child>
+             <child>
 -              <object class="GtkToolButton" id="tlb_broadcasts_assist_user">
--                <property name="visible">True</property>
--                <property name="can_focus">False</property>
++              <object class="GtkToolItem" id="tli_grupo_2">
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
 -                <property name="tooltip_text" translatable="yes">Take control of the selected user's computer</property>
 -                <property name="label" translatable="yes">Assist user</property>
 -                <property name="use_underline">True</property>
@@ -3135,193 +3315,538 @@ index 5840773..f43de39 100644
 -                <property name="homogeneous">True</property>
 -              </packing>
 -            </child>
-             <child>
-               <object class="GtkMenuToolButton" id="tlb_broadcasts_broadcast_screen">
-                 <property name="visible">True</property>
-@@ -983,6 +1019,21 @@
+-            <child>
+-              <object class="GtkMenuToolButton" id="tlb_broadcasts_broadcast_screen">
+-                <property name="visible">True</property>
+-                <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Broadcast your screen to the selected clients</property>
+-                <property name="label" translatable="yes">Broadcast screen</property>
+-                <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_broadcasts_broadcast_screen</property>
+-                <signal name="clicked" handler="on_imi_broadcasts_broadcast_screen_fullscreen_activate" swapped="no"/>
+-                <child type="menu">
+-                  <object class="GtkMenu">
++                <child>
++                  <object class="GtkBox">
+                     <property name="visible">True</property>
+                     <property name="can_focus">False</property>
++                    <property name="orientation">vertical</property>
+                     <child>
+-                      <object class="GtkMenuItem" id="tlb_broadcasts_broadcast_screen_fullscreen">
++                      <object class="GtkLabel">
+                         <property name="visible">True</property>
+                         <property name="can_focus">False</property>
+-                        <property name="tooltip_text" translatable="yes">Broadcast your screen to the selected clients, fullscreen</property>
+-                        <property name="label" translatable="yes">Broadcast screen (fullscreen)</property>
+-                        <property name="use_underline">True</property>
+-                        <signal name="activate" handler="on_imi_broadcasts_broadcast_screen_fullscreen_activate" swapped="no"/>
++                        <property name="label">Comunicar</property>
++                        <style>
++                          <class name="epoptes-grupo-nome"/>
++                        </style>
+                       </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">0</property>
++                      </packing>
+                     </child>
+                     <child>
+-                      <object class="GtkMenuItem" id="tlb_broadcasts_broadcast_screen_windowed">
++                      <object class="GtkToolbar">
+                         <property name="visible">True</property>
+                         <property name="can_focus">False</property>
+-                        <property name="tooltip_text" translatable="yes">Broadcast your screen to the selected clients, in a window</property>
+-                        <property name="label" translatable="yes">Broadcast screen (windowed)</property>
+-                        <property name="use_underline">True</property>
+-                        <signal name="activate" handler="on_imi_broadcasts_broadcast_screen_windowed_activate" swapped="no"/>
++                        <property name="toolbar_style">icons</property>
++                        <property name="show_arrow">False</property>
++                        <style>
++                          <class name="epoptes-grupo"/>
++                        </style>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_execute_send_message">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Send a message to the selected clients</property>
++                          <property name="label" translatable="yes">Send message</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_execute_send_message</property>
++                          <signal name="clicked" handler="on_imi_execute_send_message_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_execute_execute_command">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Execute a command on the selected clients</property>
++                          <property name="label" translatable="yes">Execute command</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_execute_execute</property>
++                          <signal name="clicked" handler="on_imi_execute_execute_command_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_open_terminal_root_remotely">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text">Abrir um terminal de root no cliente selecionado</property>
++                          <property name="label">Abrir um terminal de root no cliente selecionado</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_open_terminal_root_remotely</property>
++                          <signal name="clicked" handler="on_imi_open_terminal_root_remotely_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
+                       </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">1</property>
++                      </packing>
+                     </child>
+                   </object>
+                 </child>
+@@ -958,21 +1211,6 @@
                  <property name="homogeneous">False</property>
                </packing>
              </child>
-+            <child>
-+              <object class="GtkToolButton" id="tlb_execute_send_message">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+                <property name="tooltip_text" translatable="yes">Send a message to the selected clients</property>
-+                <property name="label" translatable="yes">Send message</property>
-+                <property name="use_underline">True</property>
-+                <property name="icon_widget">img_tlb_execute_send_message</property>
-+                <signal name="clicked" handler="on_imi_execute_send_message_activate" swapped="no"/>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
-+                <property name="homogeneous">True</property>
-+              </packing>
-+            </child>
+-            <child>
+-              <object class="GtkToolButton" id="tlb_broadcasts_stop_broadcasts">
+-                <property name="visible">True</property>
+-                <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Stop all broadcasts on every client</property>
+-                <property name="label" translatable="yes">Stop broadcasts</property>
+-                <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_broadcasts_stop_broadcast</property>
+-                <signal name="clicked" handler="on_imi_broadcasts_stop_broadcasts_activate" swapped="no"/>
+-              </object>
+-              <packing>
+-                <property name="expand">False</property>
+-                <property name="homogeneous">True</property>
+-              </packing>
+-            </child>
              <child>
-               <object class="GtkToolButton" id="tlb_execute_execute_command">
+               <object class="GtkSeparatorToolItem">
                  <property name="visible">True</property>
-@@ -999,14 +1050,14 @@
+@@ -984,39 +1222,180 @@
+               </packing>
+             </child>
+             <child>
+-              <object class="GtkToolButton" id="tlb_execute_execute_command">
++              <object class="GtkToolItem" id="tli_grupo_3">
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Execute a command on the selected clients</property>
+-                <property name="label" translatable="yes">Execute command</property>
+-                <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_execute_execute</property>
+-                <signal name="clicked" handler="on_imi_execute_execute_command_activate" swapped="no"/>
++                <child>
++                  <object class="GtkBox">
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <property name="orientation">vertical</property>
++                    <child>
++                      <object class="GtkLabel">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">Restringir</property>
++                        <style>
++                          <class name="epoptes-grupo-nome"/>
++                        </style>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">0</property>
++                      </packing>
++                    </child>
++                    <child>
++                      <object class="GtkToolbar">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="toolbar_style">icons</property>
++                        <property name="show_arrow">False</property>
++                        <style>
++                          <class name="epoptes-grupo"/>
++                        </style>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_restrictions_lock_screen">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Lock screen of the selected clients</property>
++                          <property name="label" translatable="yes">Lock screen</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_restrictions_lock_screen</property>
++                          <signal name="clicked" handler="on_imi_restrictions_lock_screen_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_restrictions_unlock_screen">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Unlock the screen of the selected clients</property>
++                          <property name="label" translatable="yes">Unlock screen</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_restrictions_unlock_screen</property>
++                          <signal name="clicked" handler="on_imi_restrictions_unlock_screen_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">1</property>
++                      </packing>
++                    </child>
++                  </object>
++                </child>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
+-                <property name="homogeneous">True</property>
++                <property name="homogeneous">False</property>
                </packing>
              </child>
              <child>
 -              <object class="GtkToolButton" id="tlb_execute_send_message">
-+              <object class="GtkToolButton" id="tlb_open_terminal_root_remotely">
++              <object class="GtkSeparatorToolItem">
                  <property name="visible">True</property>
                  <property name="can_focus">False</property>
 -                <property name="tooltip_text" translatable="yes">Send a message to the selected clients</property>
 -                <property name="label" translatable="yes">Send message</property>
-+                <property name="tooltip_text">Abrir um terminal de root no cliente selecionado</property>
-+                <property name="label">Abrir um terminal de root no cliente selecionado</property>
-                 <property name="use_underline">True</property>
+-                <property name="use_underline">True</property>
 -                <property name="icon_widget">img_tlb_execute_send_message</property>
 -                <signal name="clicked" handler="on_imi_execute_send_message_activate" swapped="no"/>
-+                <property name="icon_widget">img_tlb_open_terminal_root_remotely</property>
-+                <signal name="clicked" handler="on_imi_open_terminal_root_remotely_activate" swapped="no"/>
                </object>
                <packing>
                  <property name="expand">False</property>
-@@ -1077,6 +1128,141 @@
-                 <property name="expand">False</property>
-                 <property name="homogeneous">True</property>
+-                <property name="homogeneous">True</property>
++                <property name="homogeneous">False</property>
                </packing>
-+            </child>            <child>
-+              <object class="GtkToolButton" id="tlb_clients_diagnose">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+                <property name="tooltip_text">Diagnosticar o cliente selecionado</property>
-+                <property name="label">Diagnosticar o cliente selecionado</property>
-+                <property name="use_underline">True</property>
-+                <property name="icon_widget">img_tlb_clients_diagnose</property>
-+                <signal name="clicked" handler="on_imi_clients_diagnose_activate" swapped="no"/>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
-+                <property name="homogeneous">True</property>
-+              </packing>
-+            </child>
-+            <child>
-+              <object class="GtkToolButton" id="tlb_clients_reconnect">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+                <property name="tooltip_text">Reconectar a sessão do cliente selecionado</property>
-+                <property name="label">Reconectar a sessão do cliente selecionado</property>
-+                <property name="use_underline">True</property>
-+                <property name="icon_widget">img_tlb_clients_reconnect</property>
-+                <signal name="clicked" handler="on_imi_clients_reconnect_activate" swapped="no"/>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
-+                <property name="homogeneous">True</property>
-+              </packing>
-+            </child>
-+            <child>
+             </child>
+             <child>
+-              <object class="GtkSeparatorToolItem">
++              <object class="GtkToolItem" id="tli_grupo_4">
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
++                <child>
++                  <object class="GtkBox">
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <property name="orientation">vertical</property>
++                    <child>
++                      <object class="GtkLabel">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">Cliente</property>
++                        <style>
++                          <class name="epoptes-grupo-nome"/>
++                        </style>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">0</property>
++                      </packing>
++                    </child>
++                    <child>
++                      <object class="GtkToolbar">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="toolbar_style">icons</property>
++                        <property name="show_arrow">False</property>
++                        <style>
++                          <class name="epoptes-grupo"/>
++                        </style>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_clients_information">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Show information for the selected client</property>
++                          <property name="label" translatable="yes">Information</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_clients_information</property>
++                          <signal name="clicked" handler="on_imi_clients_information_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_clients_diagnose">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text">Diagnosticar o cliente selecionado</property>
++                          <property name="label">Diagnosticar o cliente selecionado</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_clients_diagnose</property>
++                          <signal name="clicked" handler="on_imi_clients_diagnose_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_clients_reconnect">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text">Reconectar a sessão do cliente selecionado</property>
++                          <property name="label">Reconectar a sessão do cliente selecionado</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_clients_reconnect</property>
++                          <signal name="clicked" handler="on_imi_clients_reconnect_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">1</property>
++                      </packing>
++                    </child>
++                  </object>
++                </child>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
+@@ -1024,33 +1403,121 @@
+               </packing>
+             </child>
+             <child>
+-              <object class="GtkToolButton" id="tlb_restrictions_lock_screen">
 +              <object class="GtkSeparatorToolItem">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+                <property name="draw">False</property>
-+              </object>
-+              <packing>
-+                <property name="expand">True</property>
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Lock screen of the selected clients</property>
+-                <property name="label" translatable="yes">Lock screen</property>
+-                <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_restrictions_lock_screen</property>
+-                <signal name="clicked" handler="on_imi_restrictions_lock_screen_activate" swapped="no"/>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
+-                <property name="homogeneous">True</property>
 +                <property name="homogeneous">False</property>
-+              </packing>
-+            </child>
-+            <child>
-+              <object class="GtkSeparatorToolItem">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
+               </packing>
+             </child>
+             <child>
+-              <object class="GtkToolButton" id="tlb_restrictions_unlock_screen">
++              <object class="GtkToolItem" id="tli_grupo_5">
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Unlock the screen of the selected clients</property>
+-                <property name="label" translatable="yes">Unlock screen</property>
+-                <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_restrictions_unlock_screen</property>
+-                <signal name="clicked" handler="on_imi_restrictions_unlock_screen_activate" swapped="no"/>
++                <child>
++                  <object class="GtkBox">
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <property name="orientation">vertical</property>
++                    <child>
++                      <object class="GtkLabel">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">Energia</property>
++                        <style>
++                          <class name="epoptes-grupo-nome"/>
++                        </style>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">0</property>
++                      </packing>
++                    </child>
++                    <child>
++                      <object class="GtkToolbar">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="toolbar_style">icons</property>
++                        <property name="show_arrow">False</property>
++                        <style>
++                          <class name="epoptes-grupo"/>
++                        </style>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_session_boot">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Boot selected clients (Wake On LAN)</property>
++                          <property name="label" translatable="yes">Boot</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_session_boot</property>
++                          <signal name="clicked" handler="on_imi_session_boot_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_session_logout">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Log out users connected on selected clients</property>
++                          <property name="label" translatable="yes">Log out</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_session_logout</property>
++                          <signal name="clicked" handler="on_imi_session_logout_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_session_reboot">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Reboot the selected clients</property>
++                          <property name="label" translatable="yes">Reboot</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_session_reboot</property>
++                          <signal name="clicked" handler="on_imi_session_reboot_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_session_shutdown">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text" translatable="yes">Shutdown the selected clients</property>
++                          <property name="label" translatable="yes">Shutdown</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_session_shutdown</property>
++                          <signal name="clicked" handler="on_imi_session_shutdown_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">1</property>
++                      </packing>
++                    </child>
++                  </object>
++                </child>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
+-                <property name="homogeneous">True</property>
 +                <property name="homogeneous">False</property>
-+              </packing>
-+            </child>
-+            <child>
-+              <object class="GtkToolButton" id="tlb_session_boot">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+                <property name="tooltip_text" translatable="yes">Boot selected clients (Wake On LAN)</property>
-+                <property name="label" translatable="yes">Boot</property>
-+                <property name="use_underline">True</property>
-+                <property name="icon_widget">img_tlb_session_boot</property>
-+                <signal name="clicked" handler="on_imi_session_boot_activate" swapped="no"/>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
-+                <property name="homogeneous">True</property>
-+              </packing>
-+            </child>
-+            <child>
-+              <object class="GtkToolButton" id="tlb_session_logout">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+                <property name="tooltip_text" translatable="yes">Log out users connected on selected clients</property>
-+                <property name="label" translatable="yes">Log out</property>
-+                <property name="use_underline">True</property>
-+                <property name="icon_widget">img_tlb_session_logout</property>
-+                <signal name="clicked" handler="on_imi_session_logout_activate" swapped="no"/>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
-+                <property name="homogeneous">True</property>
-+              </packing>
-+            </child>
-+            <child>
-+              <object class="GtkToolButton" id="tlb_session_reboot">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+                <property name="tooltip_text" translatable="yes">Reboot the selected clients</property>
-+                <property name="label" translatable="yes">Reboot</property>
-+                <property name="use_underline">True</property>
-+                <property name="icon_widget">img_tlb_session_reboot</property>
-+                <signal name="clicked" handler="on_imi_session_reboot_activate" swapped="no"/>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
-+                <property name="homogeneous">True</property>
-+              </packing>
-+            </child>
-+            <child>
-+              <object class="GtkToolButton" id="tlb_session_shutdown">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+                <property name="tooltip_text" translatable="yes">Shutdown the selected clients</property>
-+                <property name="label" translatable="yes">Shutdown</property>
-+                <property name="use_underline">True</property>
-+                <property name="icon_widget">img_tlb_session_shutdown</property>
-+                <signal name="clicked" handler="on_imi_session_shutdown_activate" swapped="no"/>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
-+                <property name="homogeneous">True</property>
-+              </packing>
-+            </child>
-+            <child>
-+              <object class="GtkSeparatorToolItem">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
+               </packing>
+             </child>
+             <child>
+@@ -1064,18 +1531,66 @@
+               </packing>
+             </child>
+             <child>
+-              <object class="GtkToolButton" id="tlb_clients_information">
++              <object class="GtkToolItem" id="tli_grupo_6">
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Show information for the selected client</property>
+-                <property name="label" translatable="yes">Information</property>
+-                <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_clients_information</property>
+-                <signal name="clicked" handler="on_imi_clients_information_activate" swapped="no"/>
++                <child>
++                  <object class="GtkBox">
++                    <property name="visible">True</property>
++                    <property name="can_focus">False</property>
++                    <property name="orientation">vertical</property>
++                    <child>
++                      <object class="GtkLabel">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="label">Epoptes</property>
++                        <style>
++                          <class name="epoptes-grupo-nome"/>
++                        </style>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">0</property>
++                      </packing>
++                    </child>
++                    <child>
++                      <object class="GtkToolbar">
++                        <property name="visible">True</property>
++                        <property name="can_focus">False</property>
++                        <property name="toolbar_style">icons</property>
++                        <property name="show_arrow">False</property>
++                        <style>
++                          <class name="epoptes-grupo"/>
++                        </style>
++                      <child>
++                        <object class="GtkToolButton" id="tlb_settings">
++                          <property name="visible">True</property>
++                          <property name="can_focus">False</property>
++                          <property name="tooltip_text">Configurações do Epoptes</property>
++                          <property name="label">Configurações do Epoptes</property>
++                          <property name="use_underline">True</property>
++                          <property name="icon_widget">img_tlb_settings</property>
++                          <signal name="clicked" handler="on_imi_settings_activate" swapped="no"/>
++                        </object>
++                        <packing>
++                          <property name="expand">False</property>
++                          <property name="homogeneous">True</property>
++                        </packing>
++                      </child>
++                      </object>
++                      <packing>
++                        <property name="expand">False</property>
++                        <property name="fill">True</property>
++                        <property name="position">1</property>
++                      </packing>
++                    </child>
++                  </object>
++                </child>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
+-                <property name="homogeneous">True</property>
 +                <property name="homogeneous">False</property>
-+              </packing>
-+            </child>
-+            <child>
-+              <object class="GtkToolButton" id="tlb_settings">
-+                <property name="visible">True</property>
-+                <property name="can_focus">False</property>
-+                <property name="tooltip_text">Configurações do Epoptes</property>
-+                <property name="label">Configurações do Epoptes</property>
-+                <property name="use_underline">True</property>
-+                <property name="icon_widget">img_tlb_settings</property>
-+                <signal name="clicked" handler="on_imi_settings_activate" swapped="no"/>
-+              </object>
-+              <packing>
-+                <property name="expand">False</property>
-+                <property name="homogeneous">True</property>
-+              </packing>
+               </packing>
              </child>
            </object>
-           <packing>
 diff --git a/usr/share/epoptes/images/diagnose.svg b/usr/share/epoptes/images/diagnose.svg
 new file mode 100644
 index 0000000..be3aca7
