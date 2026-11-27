@@ -243,7 +243,7 @@ Na máquina do aluno, como usuário, dentro da sessão gráfica:
 
     epoptes-client --check
 
-Ele confere: arquivos do pacote, serviço habilitado e rodando (runit ou systemd), se o nome do servidor resolve, o certificado local e se ele confere com o do servidor, as conexões de cada usuário (aponta duplicadas e diz qual comando encerra as sobrando) e a miniatura. Termina com "Tudo certo." ou com o número de problemas e, em cada um, o que fazer. Rodando como root, confere o lado do serviço.
+Ele confere: arquivos do pacote, serviço habilitado e rodando (runit ou systemd), se o nome do servidor resolve, o certificado local e se ele confere com o do servidor, as conexões de cada usuário (aponta duplicadas e diz qual comando encerra as sobrando) e a miniatura. Termina com "Tudo certo." ou com o número de problemas e, em cada um, o que fazer. Rodando como root (é o que o "Diagnosticar" do servidor faz pela conexão do root), confere o lado do serviço e também cada sessão gráfica aberta na máquina: se algum usuário está com a sessão aberta mas sem a conexão da sessão (o epoptes-client.desktop do autostart ou a que o vigia sobe), aponta o problema; se não há sessão aberta, avisa que só existe a conexão do root, o normal na tela de login.
 
 ## Problemas comuns
 

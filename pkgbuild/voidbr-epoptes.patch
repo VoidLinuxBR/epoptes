@@ -1231,7 +1231,7 @@ index 720c958..608b391 100644
          if (clients != [] or handles != []) and warning != '':
              if not self.confirmation_dialog(warning):
 diff --git a/usr/sbin/epoptes-client b/usr/sbin/epoptes-client
-index 7a2ee2a..84f441e 100755
+index 7a2ee2a..7a72f13 100755
 --- a/usr/sbin/epoptes-client
 +++ b/usr/sbin/epoptes-client
 @@ -9,8 +9,10 @@
@@ -1268,7 +1268,7 @@ index 7a2ee2a..84f441e 100755
          fi
          if [ "$delay" -eq 5 ]; then
              echo "Cannot resolve $SERVER, will keep retrying."
-@@ -164,6 +172,247 @@ EOF
+@@ -164,6 +172,288 @@ EOF
      fi
  }
  
@@ -1351,8 +1351,24 @@ index 7a2ee2a..84f441e 100755
 +}
 +
 +# VoidBR patch: epoptes-client --check, diagnostico em uma saida so.
++# VoidBR patch: usuarios com sessao grafica aberta nesta maquina. Mesmo
++# criterio do graphical_users() do client-functions, que e o que o servidor
++# usa no selo "Sessao nao conectou": um processo com DISPLAY= (ou
++# WAYLAND_DISPLAY=) no ambiente, de uid comum. Assim o diagnostico e o selo
++# nunca discordam. So o root le o ambiente de todos.
++graphical_session_users() {
++    local uid_min
++
++    uid_min=$(awk '$1 == "UID_MIN" { print $2; exit }' /etc/login.defs 2>/dev/null)
++    grep -lsa 'DISPLAY=' /proc/[0-9]*/environ 2>/dev/null |
++        sed 's|/environ$||' | xargs -r stat -c '%u %U' 2>/dev/null |
++        awk -v min="${uid_min:-1000}" '$1 >= min && $1 < 65534 { print $2 }' |
++        sort -u
++}
++
 +run_check() {
 +    local dir missing f remote conns err me procs summary mypids mycount state
++    local sessoes u upids
 +
 +    check_failures=0
 +    dir=/usr/share/epoptes-client
@@ -1493,6 +1509,31 @@ index 7a2ee2a..84f441e 100755
 +        else
 +            check_info "vigia de sessoes desligado (SESSION_WATCH=false)"
 +        fi
++        # Cada sessao grafica aberta precisa da sua conexao (a do
++        # epoptes-client.desktop do autostart ou a que o vigia sobe); sem ela
++        # o servidor nao ve o usuario, nem faz miniatura ou Observar.
++        sessoes=$(graphical_session_users)
++        if [ -z "$sessoes" ]; then
++            check_info "nenhum usuario com sessao grafica aberta (tela de login?): so a conexao do root"
++        fi
++        for u in $sessoes; do
++            upids=$(echo "$procs" | awk -v u="$u" '$1 == u { print $2 }')
++            if [ -z "$upids" ]; then
++                if my_boolean_is_true "${SESSION_WATCH:-true}"; then
++                    check_fail "sessao grafica de $u sem conexao: o epoptes-client da sessao nao foi iniciado" \
++                        "o vigia sobe a conexao em ate uns 40 s depois do login; se nao subir, veja o grupo epoptes, o autostart (epoptes-client.desktop) e o certificado, e rode o --check como $u, na sessao grafica"
++                else
++                    check_fail "sessao grafica de $u sem conexao: o epoptes-client da sessao nao foi iniciado" \
++                        "vigia desligado (SESSION_WATCH=false) e o autostart (epoptes-client.desktop) nao rodou; veja tambem o grupo epoptes e o certificado; como $u, na sessao grafica: setsid -f epoptes-client"
++                fi
++            elif ss -Htnp state established "( dport = :$PORT )" 2>/dev/null |
++                grep -Eq "pid=($(echo "$upids" | paste -sd '|')),"; then
++                check_ok "sessao grafica de $u conectada (PID $(echo "$upids" | paste -sd ' '))"
++            else
++                check_fail "sessao grafica de $u: o epoptes-client da sessao ainda nao conectou" \
++                    "ele tenta de novo a cada 60 s; aguarde e rode o --check de novo"
++            fi
++        done
 +        check_info "rode tambem como usuario, na sessao grafica, para testar a miniatura"
 +    elif [ -n "$WAYLAND_DISPLAY" ] || [ -n "$DISPLAY" ]; then
 +        if err=$(cd "$dir" && ./thumbshot.py 16 12 2>&1 >/dev/null); then
@@ -1516,7 +1557,7 @@ index 7a2ee2a..84f441e 100755
  # Main.
  version
  
-@@ -185,6 +434,10 @@ case "$1" in
+@@ -185,6 +475,10 @@ case "$1" in
      need_certificate=true
      shift
      ;;
@@ -1527,7 +1568,7 @@ index 7a2ee2a..84f441e 100755
  esac
  
  # Set a reasonable PATH to execute commands or to relaunch epoptes-client.
-@@ -209,6 +462,8 @@ export "PORT=${2:-$PORT}"
+@@ -209,6 +503,8 @@ export "PORT=${2:-$PORT}"
  test -n "$need_certificate" && fetch_certificate
  
  servercrt=/etc/epoptes/server.crt
@@ -1536,7 +1577,7 @@ index 7a2ee2a..84f441e 100755
  # Don't launch as root on epoptes servers, unless there's a main server
  if [ "$UID" -eq 0 ] && [ $TYPE = "standalone" ] && [ -x /usr/bin/epoptes ]; then
      if [ -s /etc/epoptes/main-server.crt ]; then
-@@ -270,6 +525,21 @@ else
+@@ -270,6 +566,21 @@ else
      cert_param="verify=0"
  fi
  
