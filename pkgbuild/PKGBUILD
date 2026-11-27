@@ -7,7 +7,7 @@
 pkgname=(chili-epoptes chili-epoptes-client)
 pkgbase=chili-epoptes
 _reponame=epoptes
-pkgver=20261126.2257
+pkgver=20261127.1916
 pkgrel=1
 pkgdesc='An opensource computer lab management and monitoring tool'
 arch=(any)
@@ -36,7 +36,7 @@ source=(
 )
 sha256sums=(
 	'SKIP'
-	'be48a9b49687bafdfc709d83e17e9ef62cf85919e5a9a42872fe9d22ee95fd0f'
+	'1620bea0d4da0e5a3f4b3e4d136a20666435ac8713a845982b071afb58ef61ff'
 )
 
 # arquivos que sao so do cliente (o resto da arvore e do servidor)
@@ -94,8 +94,14 @@ package_chili-epoptes() {
 		python-pyopenssl
 		python-service-identity
 		python-twisted
+		wayvnc
 	)
-	optdepends=('xfce4-notifyd: XFCE notification support')
+	# wayvnc -> transmitir tela com o professor em Hyprland/Sway/wlroots
+	optdepends=(
+		'xfce4-notifyd: XFCE notification support'
+		'gnome-remote-desktop: transmitir tela com o professor no GNOME com Wayland'
+		'libsecret: secret-tool, senha da transmissao no GNOME com Wayland'
+	)
 	provides=(epoptes)
 	conflicts=(epoptes)
 	backup=(etc/default/epoptes)

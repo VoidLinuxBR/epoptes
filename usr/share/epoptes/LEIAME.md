@@ -166,7 +166,30 @@ Ajuda > Manual do VoidBR (ou F1) mostra este texto. Ajuda > Sobre mostra os cré
 | GNOME com Wayland | a cada 60 s (portal) | sim (VNC do GNOME) |
 | KDE Plasma com Wayland | spectacle (não testado) | não |
 
-As outras funções (mensagem, bloquear tela, transmitir tela, terminal) seguem o Epoptes original e não foram testadas no Wayland.
+As outras funções (mensagem, bloquear tela, terminal) seguem o Epoptes original e não foram testadas no Wayland.
+
+## Transmitir tela com o professor no Wayland
+
+No X11, o Epoptes transmite a tela do professor com o x11vnc, que lê a tela do X. No Wayland não há tela do X para ler, então o servidor faz assim:
+
+1. sobe um servidor VNC local, só de visualização, que lê a tela Wayland:
+   - **GNOME**: o servidor VNC do próprio GNOME (gnome-remote-desktop), com uma senha descartável guardada na coleção "session" do chaveiro;
+   - **Hyprland, Sway e outros wlroots**: o wayvnc, escutando só em 127.0.0.1;
+2. sobe o x11vnc no modo repetidor (-reflect), que é o único visualizador desse servidor local e repassa a tela a todos os alunos, com a porta e a senha de sempre do Epoptes.
+
+Os alunos não mudam nada: recebem a transmissão do mesmo jeito que de um professor no X11. O servidor VNC do GNOME só aceita um visualizador por vez; por isso o repetidor é necessário.
+
+| Sessão do professor | Pacotes no servidor |
+|---|---|
+| X11 | x11vnc |
+| GNOME com Wayland | x11vnc, gnome-remote-desktop, libsecret (secret-tool) |
+| Hyprland, Sway e outros wlroots | x11vnc, wayvnc |
+| KDE Plasma com Wayland | não funciona |
+
+- No GNOME, enquanto transmite, aparece no canto superior direito do professor o indicador de tela compartilhada. Clicar nele para parar encerra a transmissão.
+- Se o compartilhamento de tela do GNOME já estiver ligado (Configurações > Sistema > Área de trabalho remota), a transmissão não abre; desligue-o antes.
+- Se faltar algum pacote ou o servidor VNC local não subir, o Epoptes mostra o motivo numa janela; o registro completo fica em ~/.config/epoptes/broadcast-wayland.log.
+- Parar transmissões (ou fechar o Epoptes) desfaz tudo: devolve a configuração do compartilhamento de tela do GNOME e apaga a senha do chaveiro.
 
 ## GNOME com Wayland
 

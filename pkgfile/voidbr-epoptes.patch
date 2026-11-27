@@ -83,7 +83,7 @@ index ac7b570..848abb8 100755
      path = os.path.expanduser('~/.config')
      if not os.path.isdir(path):
 diff --git a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-index 720c958..c89ff21 100644
+index 720c958..69f5a16 100644
 --- a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 +++ b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 @@ -4,10 +4,61 @@
@@ -207,7 +207,17 @@ index 720c958..c89ff21 100644
  
      def save_settings(self):
          """Helper function for on_imi_file_quit_activate."""
-@@ -276,38 +347,86 @@ class EpoptesGui(object):
+@@ -187,8 +258,7 @@ class EpoptesGui(object):
+     def on_imi_file_quit_activate(self, _widget):
+         """Handle imi_file_quit.activate and wnd_main.destroy events."""
+         self.save_settings()
+-        if self.vncserver is not None:
+-            self.vncserver.kill()
++        self.stop_vncserver()
+         if self.vncviewer is not None:
+             self.vncviewer.kill()
+         # noinspection PyUnresolvedReferences
+@@ -276,38 +346,86 @@ class EpoptesGui(object):
  
      def reverse_connection(self, cmd, *args):
          """Helper function for on_imi_broadcasts_*_activate."""
@@ -324,7 +334,116 @@ index 720c958..c89ff21 100644
  
      def on_imi_broadcasts_monitor_user_activate(self, _widget):
          """Handle imi_sbroadcasts_monitor_user.activate event."""
-@@ -504,6 +623,100 @@ class EpoptesGui(object):
+@@ -323,6 +441,9 @@ class EpoptesGui(object):
+ 
+     def broadcast_screen(self, fullscreen=''):
+         """Helper function for on_imi_broadcasts_broadcast_screen*_activate."""
++        # VoidBR patch: se o servidor da transmissao morreu, sobe de novo
++        if self.vncserver is not None and self.vncserver.poll() is not None:
++            self.vncserver = None
+         if self.vncserver is None:
+             pwdfile = config.expand_filename('vncpasswd')
+             pwd = ''.join(random.sample(
+@@ -332,11 +453,18 @@ class EpoptesGui(object):
+                 pwd = file.read()
+             self.vncserver_port = self.find_unused_port()
+             self.vncserver_pwd = ''.join('\\%o' % c for c in pwd)
+-            self.vncserver = subprocess.Popen(
+-                ['x11vnc', '-24to32', '-clip', 'xinerama0', '-forever',
+-                '-nolookup', '-nopw', '-noshm', '-quiet', '-rfbauth', pwdfile,
+-                '-rfbport', str(self.vncserver_port), '-shared', '-threads',
+-                '-viewonly'])
++            if os.environ.get('WAYLAND_DISPLAY'):
++                # VoidBR patch: no Wayland o x11vnc nao le a tela; o
++                # broadcast-wayland sobe o servidor VNC do GNOME (ou o
++                # wayvnc) e um x11vnc -reflect na mesma porta e senha.
++                if not self.start_wayland_broadcast(pwdfile):
++                    return
++            else:
++                self.vncserver = subprocess.Popen(
++                    ['x11vnc', '-24to32', '-clip', 'xinerama0', '-forever',
++                    '-nolookup', '-nopw', '-noshm', '-quiet', '-rfbauth',
++                    pwdfile, '-rfbport', str(self.vncserver_port), '-shared',
++                    '-threads', '-viewonly'])
+         # Running `xdg-screensaver reset` as root doesn't reset the D.E.
+         # screensaver, so send the reset command to both epoptes processes
+         self.exec_on_selected_clients(
+@@ -345,6 +473,63 @@ class EpoptesGui(object):
+             'receive_broadcast "${GUI_IP}:%d" "%s" %s' % (self.vncserver_port,
+             self.vncserver_pwd, fullscreen), mode=EM_SYSTEM_OR_SESSION)
+ 
++    # VoidBR patch: transmitir a tela com o servidor numa sessao Wayland.
++    def start_wayland_broadcast(self, pwdfile):
++        """Start broadcast-wayland and wait until it listens; on failure,
++        show why and return False."""
++        log = config.expand_filename('broadcast-wayland.log')
++        try:
++            script = locate_resource('broadcast-wayland')
++            with open(log, 'w', encoding='utf-8') as arq:
++                self.vncserver = subprocess.Popen(
++                    ['sh', script, str(self.vncserver_port), pwdfile],
++                    stdout=arq, stderr=subprocess.STDOUT)
++        except OSError as exc:
++            self.vncserver = None
++            self.warning_dialog(
++                'N\u00e3o foi poss\u00edvel transmitir a tela: %s' % exc)
++            return False
++        # Ate 20 s (o servidor VNC do GNOME demora uns segundos), sem
++        # congelar a janela.
++        for _i in range(100):
++            if self.vncserver.poll() is not None:
++                break
++            sck = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++            try:
++                sck.settimeout(0.2)
++                sck.connect(('127.0.0.1', self.vncserver_port))
++                return True
++            except OSError:
++                pass
++            finally:
++                sck.close()
++            for _j in range(4):
++                while Gtk.events_pending():
++                    Gtk.main_iteration()
++                GLib.usleep(50000)
++        self.stop_vncserver()
++        try:
++            with open(log, encoding='utf-8') as arq:
++                motivo = arq.read().strip()
++        except OSError:
++            motivo = ''
++        self.warning_dialog(
++            'N\u00e3o foi poss\u00edvel transmitir a tela desta sess\u00e3o '
++            'Wayland.\n\n%s' % (motivo or 'Veja %s.' % log))
++        return False
++
++    def stop_vncserver(self):
++        """Stop the broadcast server. SIGTERM, not SIGKILL: the
++        broadcast-wayland needs it to undo what it set up."""
++        if self.vncserver is None:
++            return
++        self.vncserver.terminate()
++        try:
++            self.vncserver.wait(timeout=5)
++        except subprocess.TimeoutExpired:
++            self.vncserver.kill()
++        self.vncserver = None
++
+     def on_imi_broadcasts_broadcast_screen_fullscreen_activate(self, _widget):
+         """Handle imi_broadcasts_broadcast_screen_fullscreen.activate event."""
+         self.broadcast_screen('true')
+@@ -357,9 +542,7 @@ class EpoptesGui(object):
+         """Handle imi_broadcasts_stop_broadcasts.activate event."""
+         self.exec_on_clients(['stop_receptions'], self.cstore,
+                              mode=EM_SYSTEM_AND_SESSION)
+-        if self.vncserver is not None:
+-            self.vncserver.kill()
+-            self.vncserver = None
++        self.stop_vncserver()
+ 
+     # TODO: Should we allow for running arbitrary commands in clients?
+     def on_imi_execute_execute_command_activate(self, _widget):
+@@ -504,6 +687,100 @@ class EpoptesGui(object):
          subprocess.Popen('./remote_assistance.py',
                           cwd='/usr/share/epoptes-client')
  
@@ -425,7 +544,7 @@ index 720c958..c89ff21 100644
      def on_imi_help_about_activate(self, _widget):
          """Handle imi_help_about_activate.activate event."""
          if not self.about:
-@@ -629,6 +842,12 @@ class EpoptesGui(object):
+@@ -629,6 +906,12 @@ class EpoptesGui(object):
              single_client = True
          self.get('imi_clients_information').set_sensitive(single_client)
          self.get('tlb_clients_information').set_sensitive(single_client)
@@ -438,7 +557,7 @@ index 720c958..c89ff21 100644
  
          if selected:
              self.get('mni_add_to_group').set_sensitive(True)
-@@ -764,6 +983,9 @@ class EpoptesGui(object):
+@@ -764,6 +1047,9 @@ class EpoptesGui(object):
                  client_.set_offline()
  
          LOG.w("Disconnect from", handle)
@@ -448,7 +567,7 @@ index 720c958..c89ff21 100644
          client = None
          for client in structs.clients:
              if client.hsystem == handle:
-@@ -813,12 +1035,12 @@ class EpoptesGui(object):
+@@ -813,12 +1099,12 @@ class EpoptesGui(object):
          if client.users:
              for hsession, user in client.users.items():
                  self.cstore.append(
@@ -463,7 +582,7 @@ index 720c958..c89ff21 100644
                   self.imagetypes[client.type], client, ''])
  
      def fill_icon_view(self, group, keep_selection=False):
-@@ -923,9 +1145,11 @@ class EpoptesGui(object):
+@@ -923,9 +1209,11 @@ class EpoptesGui(object):
  
          # Update/fill the client information
          client.type, client.hostname = type_, host
@@ -475,7 +594,7 @@ index 720c958..c89ff21 100644
          else:
              # This is a user epoptes-client
              client.add_user(user, name, handle)
-@@ -949,7 +1173,711 @@ class EpoptesGui(object):
+@@ -949,7 +1237,711 @@ class EpoptesGui(object):
              user = row[C_INSTANCE].users[row[C_SESSION_HANDLE]][label]
          else:
              user = ''
@@ -1188,7 +1307,7 @@ index 720c958..c89ff21 100644
  
      def calculate_label(self, client, username=''):
          """Return the iconview label from a hostname/alias and a username,
-@@ -1000,6 +1928,21 @@ class EpoptesGui(object):
+@@ -1000,6 +1992,21 @@ class EpoptesGui(object):
              del self.current_thumbshots[handle]
          return False
  
@@ -1210,7 +1329,7 @@ index 720c958..c89ff21 100644
      def got_thumbshot(self, handle, reply):
          """Callback after running`thumbshot` on a client."""
          for i in self.cstore:
-@@ -1007,11 +1950,21 @@ class EpoptesGui(object):
+@@ -1007,11 +2014,21 @@ class EpoptesGui(object):
                  # Ask for a new thumbshot THUMBSHOT_MS msec after the last one.
                  # So if the client is too stressed and needs e.g. 7 secs to
                  # send a thumbshot, we'll ask for one every 12 secs.
@@ -1233,7 +1352,7 @@ index 720c958..c89ff21 100644
                  try:
                      rowstride, size, pixels = reply.split(b'\n', 2)
                      rowstride = int(rowstride)
-@@ -1059,7 +2012,7 @@ class EpoptesGui(object):
+@@ -1059,7 +2076,7 @@ class EpoptesGui(object):
          # ${GUI_PY} must be unquoted, don't pass it as list
          if isinstance(command, list) and len(command) > 0:
              command = '%s %s' % (command[0], ' '.join(
@@ -2113,6 +2232,189 @@ index 22edcde..9c30a47 100644
      <property name="translator_credits" translatable="yes">translator-credits</property>
      <property name="artists">Andrew Wedderburn (application icon)</property>
      <property name="logo_icon_name">epoptes</property>
+diff --git a/usr/share/epoptes/broadcast-wayland b/usr/share/epoptes/broadcast-wayland
+new file mode 100755
+index 0000000..27f1928
+--- /dev/null
++++ b/usr/share/epoptes/broadcast-wayland
+@@ -0,0 +1,177 @@
++#!/bin/sh
++# -*- coding: utf-8 -*-
++#
++#  broadcast-wayland — VoidBR: "Transmitir tela" com o servidor (professor)
++#                      numa sessao Wayland
++#  Created: sex 27 nov 2026 19:11:18 -04
++#  Updated: sex 27 nov 2026 19:11:18 -04
++#
++#  Copyright (c) 2026, Vilmar Catafesta <vcatafesta@gmail.com>
++#  SPDX-License-Identifier: GPL-3.0-or-later
++#
++# No X11 o Epoptes transmite a tela do professor com o x11vnc, que le a tela
++# do X. No Wayland nao ha tela do X para ler, entao este script:
++#   1. sobe um servidor VNC local, so de visualizacao, que le a tela Wayland:
++#      - GNOME: o do proprio GNOME (gnome-remote-desktop), com uma senha
++#        descartavel na colecao "session" do chaveiro;
++#      - Hyprland, Sway e outros wlroots: o wayvnc, so em 127.0.0.1;
++#   2. sobe o x11vnc -reflect, que se conecta a esse servidor e repassa a tela
++#      aos alunos na porta e com a senha de sempre do Epoptes. O servidor do
++#      GNOME so aceita um visualizador por vez; o x11vnc e esse unico
++#      visualizador e atende a turma toda.
++# Assim os clientes nao mudam nada: recebem o mesmo "receive_broadcast".
++#
++# Uso: broadcast-wayland <porta> <arquivo de senha do x11vnc>
++# Termina (e desfaz tudo) com SIGTERM, ou quando o x11vnc sair.
++
++_VERSION_="1.0.0-20261127"
++
++porta=$1
++senhas=$2
++dir=${XDG_RUNTIME_DIR:-/tmp}/epoptes-broadcast-$(id -u)
++schema=org.gnome.desktop.remote-desktop.vnc
++xdg=org.gnome.RemoteDesktop.VncCredentials
++colecao=/org/freedesktop/secrets/collection/session
++fonte=
++xpid=
++gpid=
++
++erro() {
++    echo "$*" >&2
++    limpa
++    exit 1
++}
++
++# Porta livre em 127.0.0.1 para o servidor VNC local.
++porta_livre() {
++    python3 -c '
++import socket
++s = socket.socket()
++s.bind(("127.0.0.1", 0))
++print(s.getsockname()[1])
++s.close()
++' 2>/dev/null
++}
++
++# Espera ate 10 s alguem escutar na porta $1 (e o processo $2 continuar vivo).
++espera_porta() {
++    local tentativa=0
++
++    while [ "$tentativa" -lt 50 ]; do
++        ss -Hltn "sport = :$1" 2>/dev/null | grep -q . && return 0
++        kill -0 "$2" 2>/dev/null || return 1
++        tentativa=$((tentativa + 1))
++        sleep 0.2
++    done
++    return 1
++}
++
++grd_daemon() {
++    local f
++
++    for f in /usr/libexec/gnome-remote-desktop-daemon \
++        /usr/lib/gnome-remote-desktop-daemon \
++        /usr/lib/gnome-remote-desktop/gnome-remote-desktop-daemon; do
++        if [ -x "$f" ]; then
++            echo "$f"
++            return 0
++        fi
++    done
++    return 1
++}
++
++limpa() {
++    local k v
++
++    test -n "$xpid" && kill "$xpid" 2>/dev/null
++    test -n "$gpid" && kill "$gpid" 2>/dev/null
++    wait 2>/dev/null
++    xpid=
++    gpid=
++    if [ "$fonte" = gnome ]; then
++        if [ -s "$dir/grd-settings" ]; then
++            while read -r k v; do
++                gsettings set "$schema" "$k" "$v"
++            done <"$dir/grd-settings"
++        fi
++        timeout 30 secret-tool clear xdg:schema "$xdg" epoptes broadcast
++    fi
++    fonte=
++    rm -rf "$dir"
++}
++
++trap 'limpa; exit 0' INT TERM HUP
++
++test -n "$porta" && test -s "$senhas" ||
++    erro "uso: broadcast-wayland <porta> <arquivo de senha do x11vnc>"
++test -n "$WAYLAND_DISPLAY" || erro "a sessao do professor nao e Wayland"
++command -v x11vnc >/dev/null 2>&1 || erro "falta o pacote x11vnc no servidor"
++rm -rf "$dir"
++mkdir -p -m 700 "$dir" || erro "nao consegui criar $dir"
++lporta=$(porta_livre)
++test -n "$lporta" || erro "nao consegui escolher uma porta livre"
++
++case ":${XDG_CURRENT_DESKTOP}:" in
++*:GNOME:*)
++    fonte=gnome
++    grd=$(grd_daemon) ||
++        erro "falta o pacote gnome-remote-desktop no servidor (a transmissao no GNOME usa o servidor VNC do proprio GNOME)"
++    command -v secret-tool >/dev/null 2>&1 ||
++        erro "falta o secret-tool (pacote libsecret) no servidor"
++    if pgrep -u "$(id -u)" -f gnome-remote-desktop-daemon >/dev/null; then
++        fonte=
++        erro "o compartilhamento de tela do GNOME ja esta ligado nesta sessao; desligue-o em Configuracoes > Sistema > Area de trabalho remota e tente de novo"
++    fi
++    # Senha descartavel entre o servidor do GNOME e o x11vnc (8 letras: o
++    # limite da senha VNC).
++    senha=$(tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 8)
++    for k in enable auth-method view-only; do
++        echo "$k $(gsettings get "$schema" "$k")"
++    done >"$dir/grd-settings"
++    # O servidor do GNOME guarda a senha como GVariant de string: 'senha'.
++    # Na colecao "session" do chaveiro (so na memoria, sempre destrancada)
++    # nao aparece pedido de senha do chaveiro.
++    printf "'%s'" "$senha" | timeout 60 secret-tool store \
++        --collection="$colecao" --label='GNOME Remote Desktop VNC password' \
++        xdg:schema "$xdg" epoptes broadcast ||
++        erro "nao consegui gravar a senha no chaveiro do GNOME (gnome-keyring rodando?)"
++    gsettings set "$schema" auth-method "'password'"
++    gsettings set "$schema" view-only true
++    gsettings set "$schema" enable true
++    "$grd" --vnc-port "$lporta" >"$dir/grd.log" 2>&1 &
++    gpid=$!
++    espera_porta "$lporta" "$gpid" ||
++        erro "o gnome-remote-desktop nao subiu: $(tail -n 5 "$dir/grd.log" 2>/dev/null)"
++    X11VNC_REFLECT_PASSWORD=$senha
++    export X11VNC_REFLECT_PASSWORD
++    ;;
++*)
++    fonte=wayvnc
++    command -v wayvnc >/dev/null 2>&1 ||
++        erro "falta o pacote wayvnc no servidor (a transmissao em Hyprland, Sway e outros wlroots usa o wayvnc)"
++    # Config vazia (ignora a ~/.config/wayvnc/config do professor), socket de
++    # controle proprio (nao briga com outro wayvnc), sem entrada (-d) e so em
++    # 127.0.0.1: so o x11vnc daqui se conecta.
++    : >"$dir/wayvnc.config"
++    wayvnc -C "$dir/wayvnc.config" -S "$dir/wayvncctl" -d \
++        127.0.0.1 "$lporta" >"$dir/wayvnc.log" 2>&1 &
++    gpid=$!
++    espera_porta "$lporta" "$gpid" ||
++        erro "o wayvnc nao subiu (o compositor e wlroots?): $(tail -n 5 "$dir/wayvnc.log" 2>/dev/null)"
++    unset X11VNC_REFLECT_PASSWORD
++    ;;
++esac
++
++# O x11vnc repassa a tela aos alunos, com a senha do Epoptes, como no X11.
++x11vnc -reflect "127.0.0.1:$lporta" -forever -shared -viewonly -nopw -quiet \
++    -nolookup -rfbauth "$senhas" -rfbport "$porta" >"$dir/x11vnc.log" 2>&1 &
++xpid=$!
++espera_porta "$porta" "$xpid" ||
++    erro "o x11vnc -reflect nao subiu: $(tail -n 5 "$dir/x11vnc.log" 2>/dev/null)"
++echo "transmitindo pela porta $porta (fonte: $fonte)"
++
++# Fica ate o servidor do Epoptes mandar parar (SIGTERM) ou o x11vnc sair.
++while kill -0 "$xpid" 2>/dev/null; do
++    sleep 1
++done
++limpa
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
 index d54ba3b..07f8234 100644
 --- a/usr/share/epoptes/client-functions
