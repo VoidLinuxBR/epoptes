@@ -83,7 +83,7 @@ index ac7b570..848abb8 100755
      path = os.path.expanduser('~/.config')
      if not os.path.isdir(path):
 diff --git a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-index 720c958..608b391 100644
+index 720c958..c29ab57 100644
 --- a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 +++ b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 @@ -4,10 +4,61 @@
@@ -425,17 +425,20 @@ index 720c958..608b391 100644
      def on_imi_help_about_activate(self, _widget):
          """Handle imi_help_about_activate.activate event."""
          if not self.about:
-@@ -629,6 +842,9 @@ class EpoptesGui(object):
+@@ -629,6 +842,12 @@ class EpoptesGui(object):
              single_client = True
          self.get('imi_clients_information').set_sensitive(single_client)
          self.get('tlb_clients_information').set_sensitive(single_client)
 +        self.get('imi_clients_diagnose').set_sensitive(single_client)
-+        self.get('imi_clients_reconnect').set_sensitive(
-+            single_client and bool(selected[0][C_SESSION_HANDLE]))
++        self.get('tlb_clients_diagnose').set_sensitive(single_client)
++        # VoidBR patch: os botoes da barra seguem os itens do menu
++        reconnect = single_client and bool(selected[0][C_SESSION_HANDLE])
++        self.get('imi_clients_reconnect').set_sensitive(reconnect)
++        self.get('tlb_clients_reconnect').set_sensitive(reconnect)
  
          if selected:
              self.get('mni_add_to_group').set_sensitive(True)
-@@ -764,6 +980,9 @@ class EpoptesGui(object):
+@@ -764,6 +983,9 @@ class EpoptesGui(object):
                  client_.set_offline()
  
          LOG.w("Disconnect from", handle)
@@ -445,7 +448,7 @@ index 720c958..608b391 100644
          client = None
          for client in structs.clients:
              if client.hsystem == handle:
-@@ -813,12 +1032,12 @@ class EpoptesGui(object):
+@@ -813,12 +1035,12 @@ class EpoptesGui(object):
          if client.users:
              for hsession, user in client.users.items():
                  self.cstore.append(
@@ -460,7 +463,7 @@ index 720c958..608b391 100644
                   self.imagetypes[client.type], client, ''])
  
      def fill_icon_view(self, group, keep_selection=False):
-@@ -923,9 +1142,11 @@ class EpoptesGui(object):
+@@ -923,9 +1145,11 @@ class EpoptesGui(object):
  
          # Update/fill the client information
          client.type, client.hostname = type_, host
@@ -472,7 +475,7 @@ index 720c958..608b391 100644
          else:
              # This is a user epoptes-client
              client.add_user(user, name, handle)
-@@ -949,7 +1170,702 @@ class EpoptesGui(object):
+@@ -949,7 +1173,702 @@ class EpoptesGui(object):
              user = row[C_INSTANCE].users[row[C_SESSION_HANDLE]][label]
          else:
              user = ''
@@ -1176,7 +1179,7 @@ index 720c958..608b391 100644
  
      def calculate_label(self, client, username=''):
          """Return the iconview label from a hostname/alias and a username,
-@@ -1000,6 +1916,21 @@ class EpoptesGui(object):
+@@ -1000,6 +1919,21 @@ class EpoptesGui(object):
              del self.current_thumbshots[handle]
          return False
  
@@ -1198,7 +1201,7 @@ index 720c958..608b391 100644
      def got_thumbshot(self, handle, reply):
          """Callback after running`thumbshot` on a client."""
          for i in self.cstore:
-@@ -1007,11 +1938,21 @@ class EpoptesGui(object):
+@@ -1007,11 +1941,21 @@ class EpoptesGui(object):
                  # Ask for a new thumbshot THUMBSHOT_MS msec after the last one.
                  # So if the client is too stressed and needs e.g. 7 secs to
                  # send a thumbshot, we'll ask for one every 12 secs.
@@ -1221,7 +1224,7 @@ index 720c958..608b391 100644
                  try:
                      rowstride, size, pixels = reply.split(b'\n', 2)
                      rowstride = int(rowstride)
-@@ -1059,7 +2000,7 @@ class EpoptesGui(object):
+@@ -1059,7 +2003,7 @@ class EpoptesGui(object):
          # ${GUI_PY} must be unquoted, don't pass it as list
          if isinstance(command, list) and len(command) > 0:
              command = '%s %s' % (command[0], ' '.join(
@@ -2938,10 +2941,42 @@ index d54ba3b..07f8234 100644
      trap "on_signal $i" $i
  done
 diff --git a/usr/share/epoptes/epoptes.ui b/usr/share/epoptes/epoptes.ui
-index 5840773..ba26367 100644
+index 5840773..f43de39 100644
 --- a/usr/share/epoptes/epoptes.ui
 +++ b/usr/share/epoptes/epoptes.ui
-@@ -720,6 +720,47 @@
+@@ -169,6 +169,31 @@
+     <property name="can_focus">False</property>
+     <property name="pixbuf">images/broadcast-stop.svg</property>
+   </object>
++  <object class="GtkImage" id="img_tlb_broadcasts_monitor_user">
++    <property name="visible">True</property>
++    <property name="can_focus">False</property>
++    <property name="pixbuf">images/observe.svg</property>
++  </object>
++  <object class="GtkImage" id="img_tlb_open_terminal_root_remotely">
++    <property name="visible">True</property>
++    <property name="can_focus">False</property>
++    <property name="pixbuf">images/root-terminal.svg</property>
++  </object>
++  <object class="GtkImage" id="img_tlb_clients_diagnose">
++    <property name="visible">True</property>
++    <property name="can_focus">False</property>
++    <property name="pixbuf">images/diagnose.svg</property>
++  </object>
++  <object class="GtkImage" id="img_tlb_clients_reconnect">
++    <property name="visible">True</property>
++    <property name="can_focus">False</property>
++    <property name="pixbuf">images/reconnect.svg</property>
++  </object>
++  <object class="GtkImage" id="img_tlb_settings">
++    <property name="visible">True</property>
++    <property name="can_focus">False</property>
++    <property name="pixbuf">images/settings.svg</property>
++  </object>
+   <object class="GtkImage" id="img_tlb_clients_information">
+     <property name="visible">True</property>
+     <property name="can_focus">False</property>
+@@ -720,6 +745,47 @@
                          <signal name="activate" handler="on_imi_clients_information_activate" swapped="no"/>
                        </object>
                      </child>
@@ -2989,7 +3024,7 @@ index 5840773..ba26367 100644
                    </object>
                  </child>
                </object>
-@@ -734,6 +775,21 @@
+@@ -734,6 +800,21 @@
                    <object class="GtkMenu">
                      <property name="visible">True</property>
                      <property name="can_focus">False</property>
@@ -3011,3 +3046,346 @@ index 5840773..ba26367 100644
                      <child>
                        <object class="GtkImageMenuItem" id="imi_help_home">
                          <property name="label">gtk-home</property>
+@@ -833,14 +914,14 @@
+             <property name="can_focus">False</property>
+             <property name="toolbar_style">icons</property>
+             <child>
+-              <object class="GtkToolButton" id="tlb_session_boot">
++              <object class="GtkToolButton" id="tlb_broadcasts_monitor_user">
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Boot selected clients (Wake On LAN)</property>
+-                <property name="label" translatable="yes">Boot</property>
++                <property name="tooltip_text">Observar a tela do usuário selecionado</property>
++                <property name="label">Observar a tela do usuário selecionado</property>
+                 <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_session_boot</property>
+-                <signal name="clicked" handler="on_imi_session_boot_activate" swapped="no"/>
++                <property name="icon_widget">img_tlb_broadcasts_monitor_user</property>
++                <signal name="clicked" handler="on_imi_broadcasts_monitor_user_activate" swapped="no"/>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
+@@ -848,44 +929,14 @@
+               </packing>
+             </child>
+             <child>
+-              <object class="GtkToolButton" id="tlb_session_logout">
+-                <property name="visible">True</property>
+-                <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Log out users connected on selected clients</property>
+-                <property name="label" translatable="yes">Log out</property>
+-                <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_session_logout</property>
+-                <signal name="clicked" handler="on_imi_session_logout_activate" swapped="no"/>
+-              </object>
+-              <packing>
+-                <property name="expand">False</property>
+-                <property name="homogeneous">True</property>
+-              </packing>
+-            </child>
+-            <child>
+-              <object class="GtkToolButton" id="tlb_session_reboot">
+-                <property name="visible">True</property>
+-                <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Reboot the selected clients</property>
+-                <property name="label" translatable="yes">Reboot</property>
+-                <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_session_reboot</property>
+-                <signal name="clicked" handler="on_imi_session_reboot_activate" swapped="no"/>
+-              </object>
+-              <packing>
+-                <property name="expand">False</property>
+-                <property name="homogeneous">True</property>
+-              </packing>
+-            </child>
+-            <child>
+-              <object class="GtkToolButton" id="tlb_session_shutdown">
++              <object class="GtkToolButton" id="tlb_broadcasts_assist_user">
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Shutdown the selected clients</property>
+-                <property name="label" translatable="yes">Shutdown</property>
++                <property name="tooltip_text" translatable="yes">Take control of the selected user's computer</property>
++                <property name="label" translatable="yes">Assist user</property>
+                 <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_session_shutdown</property>
+-                <signal name="clicked" handler="on_imi_session_shutdown_activate" swapped="no"/>
++                <property name="icon_widget">img_tlb_broadcasts_assist_user</property>
++                <signal name="clicked" handler="on_imi_broadcasts_assist_user_activate" swapped="no"/>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
+@@ -902,21 +953,6 @@
+                 <property name="homogeneous">False</property>
+               </packing>
+             </child>
+-            <child>
+-              <object class="GtkToolButton" id="tlb_broadcasts_assist_user">
+-                <property name="visible">True</property>
+-                <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Take control of the selected user's computer</property>
+-                <property name="label" translatable="yes">Assist user</property>
+-                <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_broadcasts_assist_user</property>
+-                <signal name="clicked" handler="on_imi_broadcasts_assist_user_activate" swapped="no"/>
+-              </object>
+-              <packing>
+-                <property name="expand">False</property>
+-                <property name="homogeneous">True</property>
+-              </packing>
+-            </child>
+             <child>
+               <object class="GtkMenuToolButton" id="tlb_broadcasts_broadcast_screen">
+                 <property name="visible">True</property>
+@@ -983,6 +1019,21 @@
+                 <property name="homogeneous">False</property>
+               </packing>
+             </child>
++            <child>
++              <object class="GtkToolButton" id="tlb_execute_send_message">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="tooltip_text" translatable="yes">Send a message to the selected clients</property>
++                <property name="label" translatable="yes">Send message</property>
++                <property name="use_underline">True</property>
++                <property name="icon_widget">img_tlb_execute_send_message</property>
++                <signal name="clicked" handler="on_imi_execute_send_message_activate" swapped="no"/>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">True</property>
++              </packing>
++            </child>
+             <child>
+               <object class="GtkToolButton" id="tlb_execute_execute_command">
+                 <property name="visible">True</property>
+@@ -999,14 +1050,14 @@
+               </packing>
+             </child>
+             <child>
+-              <object class="GtkToolButton" id="tlb_execute_send_message">
++              <object class="GtkToolButton" id="tlb_open_terminal_root_remotely">
+                 <property name="visible">True</property>
+                 <property name="can_focus">False</property>
+-                <property name="tooltip_text" translatable="yes">Send a message to the selected clients</property>
+-                <property name="label" translatable="yes">Send message</property>
++                <property name="tooltip_text">Abrir um terminal de root no cliente selecionado</property>
++                <property name="label">Abrir um terminal de root no cliente selecionado</property>
+                 <property name="use_underline">True</property>
+-                <property name="icon_widget">img_tlb_execute_send_message</property>
+-                <signal name="clicked" handler="on_imi_execute_send_message_activate" swapped="no"/>
++                <property name="icon_widget">img_tlb_open_terminal_root_remotely</property>
++                <signal name="clicked" handler="on_imi_open_terminal_root_remotely_activate" swapped="no"/>
+               </object>
+               <packing>
+                 <property name="expand">False</property>
+@@ -1077,6 +1128,141 @@
+                 <property name="expand">False</property>
+                 <property name="homogeneous">True</property>
+               </packing>
++            </child>            <child>
++              <object class="GtkToolButton" id="tlb_clients_diagnose">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="tooltip_text">Diagnosticar o cliente selecionado</property>
++                <property name="label">Diagnosticar o cliente selecionado</property>
++                <property name="use_underline">True</property>
++                <property name="icon_widget">img_tlb_clients_diagnose</property>
++                <signal name="clicked" handler="on_imi_clients_diagnose_activate" swapped="no"/>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">True</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkToolButton" id="tlb_clients_reconnect">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="tooltip_text">Reconectar a sessão do cliente selecionado</property>
++                <property name="label">Reconectar a sessão do cliente selecionado</property>
++                <property name="use_underline">True</property>
++                <property name="icon_widget">img_tlb_clients_reconnect</property>
++                <signal name="clicked" handler="on_imi_clients_reconnect_activate" swapped="no"/>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">True</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkSeparatorToolItem">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="draw">False</property>
++              </object>
++              <packing>
++                <property name="expand">True</property>
++                <property name="homogeneous">False</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkSeparatorToolItem">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">False</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkToolButton" id="tlb_session_boot">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="tooltip_text" translatable="yes">Boot selected clients (Wake On LAN)</property>
++                <property name="label" translatable="yes">Boot</property>
++                <property name="use_underline">True</property>
++                <property name="icon_widget">img_tlb_session_boot</property>
++                <signal name="clicked" handler="on_imi_session_boot_activate" swapped="no"/>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">True</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkToolButton" id="tlb_session_logout">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="tooltip_text" translatable="yes">Log out users connected on selected clients</property>
++                <property name="label" translatable="yes">Log out</property>
++                <property name="use_underline">True</property>
++                <property name="icon_widget">img_tlb_session_logout</property>
++                <signal name="clicked" handler="on_imi_session_logout_activate" swapped="no"/>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">True</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkToolButton" id="tlb_session_reboot">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="tooltip_text" translatable="yes">Reboot the selected clients</property>
++                <property name="label" translatable="yes">Reboot</property>
++                <property name="use_underline">True</property>
++                <property name="icon_widget">img_tlb_session_reboot</property>
++                <signal name="clicked" handler="on_imi_session_reboot_activate" swapped="no"/>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">True</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkToolButton" id="tlb_session_shutdown">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="tooltip_text" translatable="yes">Shutdown the selected clients</property>
++                <property name="label" translatable="yes">Shutdown</property>
++                <property name="use_underline">True</property>
++                <property name="icon_widget">img_tlb_session_shutdown</property>
++                <signal name="clicked" handler="on_imi_session_shutdown_activate" swapped="no"/>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">True</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkSeparatorToolItem">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">False</property>
++              </packing>
++            </child>
++            <child>
++              <object class="GtkToolButton" id="tlb_settings">
++                <property name="visible">True</property>
++                <property name="can_focus">False</property>
++                <property name="tooltip_text">Configurações do Epoptes</property>
++                <property name="label">Configurações do Epoptes</property>
++                <property name="use_underline">True</property>
++                <property name="icon_widget">img_tlb_settings</property>
++                <signal name="clicked" handler="on_imi_settings_activate" swapped="no"/>
++              </object>
++              <packing>
++                <property name="expand">False</property>
++                <property name="homogeneous">True</property>
++              </packing>
+             </child>
+           </object>
+           <packing>
+diff --git a/usr/share/epoptes/images/diagnose.svg b/usr/share/epoptes/images/diagnose.svg
+new file mode 100644
+index 0000000..be3aca7
+--- /dev/null
++++ b/usr/share/epoptes/images/diagnose.svg
+@@ -0,0 +1,18 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
++  <defs>
++    <linearGradient id="papel" x1="0" y1="0" x2="0" y2="1">
++      <stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dcdcd6"/>
++    </linearGradient>
++    <linearGradient id="lente" x1="0" y1="0" x2="1" y2="1">
++      <stop offset="0" stop-color="#d7e8fa"/><stop offset="1" stop-color="#729fcf"/>
++    </linearGradient>
++  </defs>
++  <rect x="2.5" y="2.5" width="14" height="18" rx="1.5" fill="url(#papel)" stroke="#888a85"/>
++  <path d="M5 7 l1.3 1.3 L8.5 6" fill="none" stroke="#4e9a06" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
++  <path d="M5 11.5 l1.3 1.3 L8.5 10.5" fill="none" stroke="#4e9a06" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
++  <path d="M5.2 15.2 l2.6 2.6 M7.8 15.2 l-2.6 2.6" fill="none" stroke="#cc0000" stroke-width="1.6" stroke-linecap="round"/>
++  <path d="M10 7.2 h4 M10 11.7 h3 M10 16.5 h2" stroke="#babdb6" stroke-width="1.4" stroke-linecap="round"/>
++  <circle cx="15.5" cy="15.5" r="4.2" fill="url(#lente)" fill-opacity="0.85" stroke="#3465a4" stroke-width="1.6"/>
++  <path d="M18.6 18.6 L22 22" stroke="#555753" stroke-width="2.6" stroke-linecap="round"/>
++</svg>
+diff --git a/usr/share/epoptes/images/reconnect.svg b/usr/share/epoptes/images/reconnect.svg
+new file mode 100644
+index 0000000..ad16e40
+--- /dev/null
++++ b/usr/share/epoptes/images/reconnect.svg
+@@ -0,0 +1,17 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
++  <defs>
++    <linearGradient id="seta" x1="0" y1="0" x2="1" y2="1">
++      <stop offset="0" stop-color="#8ae234"/><stop offset="1" stop-color="#4e9a06"/>
++    </linearGradient>
++    <linearGradient id="seta2" x1="1" y1="1" x2="0" y2="0">
++      <stop offset="0" stop-color="#729fcf"/><stop offset="1" stop-color="#3465a4"/>
++    </linearGradient>
++  </defs>
++  <path d="M4.2 11 A8 8 0 0 1 18.2 6.2" fill="none" stroke="url(#seta)" stroke-width="2.8" stroke-linecap="round"/>
++  <path d="M20.6 3.2 L19.9 9.3 L14.2 7.4 Z" fill="#4e9a06" stroke="#4e9a06" stroke-linejoin="round"/>
++  <path d="M19.8 13 A8 8 0 0 1 5.8 17.8" fill="none" stroke="url(#seta2)" stroke-width="2.8" stroke-linecap="round"/>
++  <path d="M3.4 20.8 L4.1 14.7 L9.8 16.6 Z" fill="#3465a4" stroke="#3465a4" stroke-linejoin="round"/>
++  <rect x="9" y="9.2" width="6" height="5.6" rx="1" fill="#eeeeec" stroke="#555753"/>
++  <path d="M10.6 9.2 v-1.6 M13.4 9.2 v-1.6" stroke="#555753" stroke-width="1.2" stroke-linecap="round"/>
++</svg>
+diff --git a/usr/share/epoptes/images/settings.svg b/usr/share/epoptes/images/settings.svg
+new file mode 100644
+index 0000000..79739bd
+--- /dev/null
++++ b/usr/share/epoptes/images/settings.svg
+@@ -0,0 +1,14 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
++  <defs>
++    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="1">
++      <stop offset="0" stop-color="#eeeeec"/><stop offset="1" stop-color="#888a85"/>
++    </linearGradient>
++  </defs>
++  <g transform="translate(12 12)">
++    <path fill="url(#metal)" stroke="#555753" stroke-width="1" stroke-linejoin="round"
++      d="M-1.6,-10 h3.2 l0.5,2.6 a7.6,7.6 0 0 1 2.2,1.3 l2.5,-0.9 l1.6,2.8 l-2,1.7 a7.6,7.6 0 0 1 0,2.6 l2,1.7 l-1.6,2.8 l-2.5,-0.9 a7.6,7.6 0 0 1 -2.2,1.3 l-0.5,2.6 h-3.2 l-0.5,-2.6 a7.6,7.6 0 0 1 -2.2,-1.3 l-2.5,0.9 l-1.6,-2.8 l2,-1.7 a7.6,7.6 0 0 1 0,-2.6 l-2,-1.7 l1.6,-2.8 l2.5,0.9 a7.6,7.6 0 0 1 2.2,-1.3 z"/>
++    <circle r="3.2" fill="#f6f5f4" stroke="#555753" stroke-width="1"/>
++    <circle r="1.4" fill="#729fcf" stroke="#3465a4" stroke-width="0.8"/>
++  </g>
++</svg>
