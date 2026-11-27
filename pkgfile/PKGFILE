@@ -21,7 +21,7 @@ license=(GPL3)
 arch=(any)
 sha256sums=(
 	'SKIP'
-	'9e470a703ce38fdb73a5b086402f4d70485f98ff72c5ea225d29e25b92044f09'
+	'7e178dec6d4e7a7409540e481af0a67d80567c13213c931968796b49f6ca3676'
 )
 
 # o que os DOIS usam

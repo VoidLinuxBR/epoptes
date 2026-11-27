@@ -1231,7 +1231,7 @@ index 720c958..608b391 100644
          if (clients != [] or handles != []) and warning != '':
              if not self.confirmation_dialog(warning):
 diff --git a/usr/sbin/epoptes-client b/usr/sbin/epoptes-client
-index 7a2ee2a..7a72f13 100755
+index 7a2ee2a..f84e962 100755
 --- a/usr/sbin/epoptes-client
 +++ b/usr/sbin/epoptes-client
 @@ -9,8 +9,10 @@
@@ -1268,7 +1268,7 @@ index 7a2ee2a..7a72f13 100755
          fi
          if [ "$delay" -eq 5 ]; then
              echo "Cannot resolve $SERVER, will keep retrying."
-@@ -164,6 +172,288 @@ EOF
+@@ -164,6 +172,318 @@ EOF
      fi
  }
  
@@ -1351,19 +1351,49 @@ index 7a2ee2a..7a72f13 100755
 +}
 +
 +# VoidBR patch: epoptes-client --check, diagnostico em uma saida so.
-+# VoidBR patch: usuarios com sessao grafica aberta nesta maquina. Mesmo
-+# criterio do graphical_users() do client-functions, que e o que o servidor
-+# usa no selo "Sessao nao conectou": um processo com DISPLAY= (ou
-+# WAYLAND_DISPLAY=) no ambiente, de uid comum. Assim o diagnostico e o selo
-+# nunca discordam. So o root le o ambiente de todos.
++# VoidBR patch: usuarios com sessao grafica aberta nesta maquina, um por
++# linha. Mesmo criterio do graphical_users() do client-functions (o selo
++# "Sessao nao conectou" do servidor) e do vigia: um processo de uid comum com
++# WAYLAND_DISPLAY ou DISPLAY=:N no ambiente e o socket dessa tela ainda
++# existindo. So o root le o ambiente de todos.
 +graphical_session_users() {
-+    local uid_min
++    local uid_min f pid uid vistos amb wd dp rt n
 +
 +    uid_min=$(awk '$1 == "UID_MIN" { print $2; exit }' /etc/login.defs 2>/dev/null)
-+    grep -lsa 'DISPLAY=' /proc/[0-9]*/environ 2>/dev/null |
-+        sed 's|/environ$||' | xargs -r stat -c '%u %U' 2>/dev/null |
-+        awk -v min="${uid_min:-1000}" '$1 >= min && $1 < 65534 { print $2 }' |
-+        sort -u
++    uid_min=${uid_min:-1000}
++    vistos=" "
++    for f in $(grep -lsa 'DISPLAY=' /proc/[0-9]*/environ 2>/dev/null); do
++        pid=${f#/proc/}
++        pid=${pid%/environ}
++        uid=$(stat -c %u "/proc/$pid" 2>/dev/null) || continue
++        test "$uid" -ge "$uid_min" 2>/dev/null && test "$uid" -lt 65534 || continue
++        case "$vistos" in
++        *" $uid "*) continue ;;
++        esac
++        amb=$(tr '\0' '\n' 2>/dev/null <"$f") || continue
++        wd=$(echo "$amb" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n 1)
++        dp=$(echo "$amb" | sed -n 's/^DISPLAY=//p' | head -n 1)
++        rt=$(echo "$amb" | sed -n 's/^XDG_RUNTIME_DIR=//p' | head -n 1)
++        rt=${rt:-/run/user/$uid}
++        # O socket da tela tem que existir: um processo que sobrou de uma
++        # sessao que ja acabou (ou um ssh -X, DISPLAY=localhost:10) nao conta.
++        if [ -n "$wd" ]; then
++            case "$wd" in
++            /*) test -S "$wd" ;;
++            *) test -S "$rt/$wd" ;;
++            esac || continue
++        else
++            case "$dp" in
++            :*) ;;
++            *) continue ;;
++            esac
++            n=${dp#:}
++            n=${n%%.*}
++            test -S "/tmp/.X11-unix/X$n" || continue
++        fi
++        vistos="$vistos$uid "
++        stat -c %U "/proc/$pid" 2>/dev/null
++    done | sort -u
 +}
 +
 +run_check() {
@@ -1557,7 +1587,7 @@ index 7a2ee2a..7a72f13 100755
  # Main.
  version
  
-@@ -185,6 +475,10 @@ case "$1" in
+@@ -185,6 +505,10 @@ case "$1" in
      need_certificate=true
      shift
      ;;
@@ -1568,7 +1598,7 @@ index 7a2ee2a..7a72f13 100755
  esac
  
  # Set a reasonable PATH to execute commands or to relaunch epoptes-client.
-@@ -209,6 +503,8 @@ export "PORT=${2:-$PORT}"
+@@ -209,6 +533,8 @@ export "PORT=${2:-$PORT}"
  test -n "$need_certificate" && fetch_certificate
  
  servercrt=/etc/epoptes/server.crt
@@ -1577,7 +1607,7 @@ index 7a2ee2a..7a72f13 100755
  # Don't launch as root on epoptes servers, unless there's a main server
  if [ "$UID" -eq 0 ] && [ $TYPE = "standalone" ] && [ -x /usr/bin/epoptes ]; then
      if [ -s /etc/epoptes/main-server.crt ]; then
-@@ -270,6 +566,21 @@ else
+@@ -270,6 +596,21 @@ else
      cert_param="verify=0"
  fi
  
@@ -1601,17 +1631,17 @@ index 7a2ee2a..7a72f13 100755
  if [ -s "$servercrt" ] || [ "$cert_param" = "verify=0" ]; then
 diff --git a/usr/share/epoptes-client/session-watch b/usr/share/epoptes-client/session-watch
 new file mode 100755
-index 0000000..9bbc122
+index 0000000..467b8de
 --- /dev/null
 +++ b/usr/share/epoptes-client/session-watch
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,160 @@
 +#!/bin/sh
 +# -*- coding: utf-8 -*-
 +#
 +#  session-watch — VoidBR: sobe a conexao da sessao do epoptes-client quando
 +#                  o ambiente grafico nao roda o autostart do XDG
 +#  Created: qua 25 nov 2026 10:55:00 -04
-+#  Updated: qua 25 nov 2026 10:55:00 -04
++#  Updated: qui 26 nov 2026 22:29:07 -04
 +#
 +#  Copyright (c) 2026, Vilmar Catafesta <vcatafesta@gmail.com>
 +#  SPDX-License-Identifier: GPL-3.0-or-later
@@ -1629,7 +1659,7 @@ index 0000000..9bbc122
 +# Uso: session-watch <pid>   (sai quando o processo <pid> terminar)
 +# Desligar: SESSION_WATCH=false em /etc/default/epoptes-client
 +
-+_VERSION_="1.0.0-20261125"
++_VERSION_="1.0.1-20261126"
 +
 +pai=$1
 +interval=${SESSION_WATCH_INTERVAL:-10}
@@ -1665,7 +1695,10 @@ index 0000000..9bbc122
 +    ps -e --sort=start_time -o uid=,user:32=,pid= |
 +        while read -r uid user pid; do
 +            test "$uid" -ge "$uid_min" 2>/dev/null && test "$uid" -lt 65534 || continue
-+            env=$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null) || continue
++            # O 2>/dev/null vem antes do <: o processo pode ter acabado
++            # depois do ps, e no sh o erro de abrir o arquivo so e calado se o
++            # stderr ja estiver desviado.
++            env=$(tr '\0' '\n' 2>/dev/null <"/proc/$pid/environ") || continue
 +            case "$env" in
 +            *SSH_CONNECTION=*) continue ;;
 +            esac
@@ -1674,14 +1707,21 @@ index 0000000..9bbc122
 +        done | awk '!visto[$1]++'
 +}
 +
-+# A sessao do usuario ja tem conexao? (cada conexao e um processo socat)
++# A sessao do usuario ja tem conexao? Cada conexao e um processo socat que
++# fala com o servidor do Epoptes (openssl-connect:SERVER:PORT,... ou
++# tcp:SERVER:PORT,...). So o socat que vai para SERVER:PORT conta: um socat
++# qualquer do usuario, alheio ao Epoptes, nao. SERVER e PORT vem exportados
++# do epoptes-client que sobe o vigia.
 +has_session_conn() {
-+    ps -C socat -o user:32= 2>/dev/null | grep -qx "$1"
++    ps -C socat -o user:32=,args= 2>/dev/null |
++        awk -v u="$1" -v alvo=":${SERVER:-server}:${PORT:-789}," '
++            $1 == u && index($0, alvo) { achou = 1 }
++            END { exit !achou }'
 +}
 +
 +# Valor de uma variavel no ambiente do processo $1
 +env_of() {
-+    tr '\0' '\n' <"/proc/$1/environ" 2>/dev/null | sed -n "s/^$2=//p" | head -n 1
++    tr '\0' '\n' 2>/dev/null <"/proc/$1/environ" | sed -n "s/^$2=//p" | head -n 1
 +}
 +
 +launch() {
@@ -2053,10 +2093,10 @@ index 22edcde..9c30a47 100644
      <property name="artists">Andrew Wedderburn (application icon)</property>
      <property name="logo_icon_name">epoptes</property>
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..ff727d2 100644
+index d54ba3b..07f8234 100644
 --- a/usr/share/epoptes/client-functions
 +++ b/usr/share/epoptes/client-functions
-@@ -6,6 +6,127 @@
+@@ -6,6 +6,134 @@
  # Implements the client side of the epoptes communications protocol.
  # The daemon reads this file when it starts, and sends it to clients when they
  # connect. The clients actually source it and then wait for further commands.
@@ -2178,13 +2218,20 @@ index d54ba3b..ff727d2 100644
 +#     Observar no GNOME pedia a senha da carteira "kdewallet"; e o
 +#     gnome-keyring iniciado pelo PAM no autologin nem chegava a pedir o
 +#     nome. Na conexao da sessao GNOME (e de novo antes do Observar), se o
-+#     dono nao for o gnome-keyring, encerra o ksecretd do usuario e sobe um
-+#     gnome-keyring novo com --replace, ja no D-Bus desta sessao.
++#     dono nao for o gnome-keyring: sem dono, primeiro tenta o --start no
++#     daemon que ja existe (mantem o chaveiro destrancado pelo PAM); se nao
++#     der, ou se o dono for o ksecretd, encerra o ksecretd do usuario e sobe
++#     um gnome-keyring novo com --replace, ja no D-Bus desta sessao.
++#
++# 12. graphical_users() so conta uma sessao grafica se o socket da tela
++#     (Wayland ou X) ainda existir, como o vigia e o epoptes-client --check.
++#     Um processo que sobrou de uma sessao encerrada dava o selo "Sessao nao
++#     conectou" sem ninguem logado.
 +# ============================================================================
  
  # Dash handles signals a bit differently from bash.
  # We need to trap both 0 and 15 otherwise the trap function isn't called at all.
-@@ -20,8 +141,13 @@ on_signal() {
+@@ -20,8 +148,13 @@ on_signal() {
  
      code="$?"
      trap - 0 15
@@ -2199,7 +2246,7 @@ index d54ba3b..ff727d2 100644
          systemctl list-jobs | grep -q 'shutdown.target[[:space:]]*start'; then
          echo "epoptes-client got signal: $1, but system is shutting down" >&5
      else
-@@ -60,16 +186,64 @@ ensure_display() {
+@@ -60,16 +193,64 @@ ensure_display() {
      fi
  }
  
@@ -2264,7 +2311,7 @@ index d54ba3b..ff727d2 100644
      xprop -root -remove "$1"
  }
  
-@@ -139,14 +313,32 @@ info() {
+@@ -139,14 +320,32 @@ info() {
          else
              server_ip=$(getent hosts "$SERVER" | awk '{ print $1; exit }')
              server_ip=${server_ip:-$SERVER}
@@ -2303,7 +2350,7 @@ index d54ba3b..ff727d2 100644
              MAC=$(main_mac)
              MAC=${MAC%% *}
              test -n "$MAC" || die "Empty MAC"
-@@ -177,9 +369,170 @@ cpu=$CPU
+@@ -177,9 +376,224 @@ cpu=$CPU
  ram=$RAM
  vga=$VGA
  os=$OS
@@ -2369,28 +2416,44 @@ index d54ba3b..ff727d2 100644
 +    [ -n "$p" ] && [ "$(ps -o comm= -p "$p" 2>/dev/null)" = gnome-keyring-d ]
 +}
 +
-+# VoidBR patch: garante o gnome-keyring como servico de senhas na sessao
-+# GNOME. Se a carteira do KDE (ksecretd) ganhou a corrida do login, ou se o
-+# gnome-keyring do PAM nao pegou o nome, encerra o ksecretd do usuario e sobe
-+# um gnome-keyring novo no lugar do antigo (--replace), ja ligado ao D-Bus
-+# desta sessao. Espera ate 5 s ele pegar o nome.
-+ensure_gnome_keyring() {
++# VoidBR patch: espera ate 5 s o gnome-keyring virar o servico de senhas.
++wait_gnome_keyring() {
 +    local tentativa
 +
-+    gnome_keyring_owner && return 0
-+    if ! command -v gnome-keyring-daemon >/dev/null 2>&1; then
-+        echo "ensure_gnome_keyring: falta o pacote gnome-keyring no cliente" >&5
-+        return 1
-+    fi
-+    pkill -u "$UID" -x ksecretd 2>/dev/null
-+    gnome-keyring-daemon --replace --daemonize \
-+        --components=pkcs11,secrets,ssh >/dev/null 2>&1
 +    tentativa=0
 +    while [ "$tentativa" -lt 25 ]; do
 +        gnome_keyring_owner && return 0
 +        tentativa=$((tentativa + 1))
 +        sleep 0.2
 +    done
++    return 1
++}
++
++# VoidBR patch: garante o gnome-keyring como servico de senhas na sessao
++# GNOME. Se a carteira do KDE (ksecretd) ganhou a corrida do login, ou se o
++# gnome-keyring do PAM nao pegou o nome, encerra o ksecretd do usuario e sobe
++# um gnome-keyring novo no lugar do antigo (--replace), ja ligado ao D-Bus
++# desta sessao. Espera ate 5 s ele pegar o nome.
++ensure_gnome_keyring() {
++    gnome_keyring_owner && return 0
++    if ! command -v gnome-keyring-daemon >/dev/null 2>&1; then
++        echo "ensure_gnome_keyring: falta o pacote gnome-keyring no cliente" >&5
++        return 1
++    fi
++    # Ninguem atende ainda: pode ser so o autostart do gnome-keyring
++    # (gnome-keyring-secrets.desktop) atrasado. Pede ao daemon que ja existe
++    # que ligue a parte "secrets" e espera ate 5 s; assim, num login com
++    # senha, o chaveiro "login" ja destrancado pelo PAM continua o mesmo.
++    if [ -z "$(secrets_owner)" ]; then
++        gnome-keyring-daemon --start --components=secrets >/dev/null 2>&1
++        wait_gnome_keyring && return 0
++    fi
++    # A carteira do KDE pegou o nome, ou o daemon do PAM nao liga a parte
++    # "secrets" (visto no autologin): sobe um gnome-keyring novo no lugar.
++    pkill -u "$UID" -x ksecretd 2>/dev/null
++    gnome-keyring-daemon --replace --daemonize \
++        --components=pkcs11,secrets,ssh >/dev/null 2>&1
++    wait_gnome_keyring && return 0
 +    echo "ensure_gnome_keyring: o gnome-keyring nao assumiu o servico de senhas (org.freedesktop.secrets)" >&5
 +    return 1
 +}
@@ -2439,14 +2502,52 @@ index d54ba3b..ff727d2 100644
 +# processos). Conta quem tem processo com DISPLAY/WAYLAND_DISPLAY e uid de
 +# usuario comum (>= UID_MIN), o que deixa de fora o greeter (sddm, gdm...).
 +graphical_users() {
-+    local uid_min
-+
 +    test "$UID" -eq 0 || return 0
++    graphical_users_list | paste -sd ',' -
++}
++
++# VoidBR patch: um usuario por linha (ver graphical_users). Mesmo criterio do
++# vigia (session-watch) e do epoptes-client --check: um processo de uid comum
++# com WAYLAND_DISPLAY ou DISPLAY=:N no ambiente e o socket dessa tela ainda
++# existindo.
++graphical_users_list() {
++    local uid_min f pid uid vistos amb wd dp rt n
++
 +    uid_min=$(awk '$1 == "UID_MIN" { print $2; exit }' /etc/login.defs 2>/dev/null)
-+    grep -lsa 'DISPLAY=' /proc/[0-9]*/environ 2>/dev/null |
-+        sed 's|/environ$||' | xargs -r stat -c '%u %U' 2>/dev/null |
-+        awk -v min="${uid_min:-1000}" '$1 >= min && $1 < 65534 { print $2 }' |
-+        sort -u | paste -sd ',' -
++    uid_min=${uid_min:-1000}
++    vistos=" "
++    for f in $(grep -lsa 'DISPLAY=' /proc/[0-9]*/environ 2>/dev/null); do
++        pid=${f#/proc/}
++        pid=${pid%/environ}
++        uid=$(stat -c %u "/proc/$pid" 2>/dev/null) || continue
++        test "$uid" -ge "$uid_min" 2>/dev/null && test "$uid" -lt 65534 || continue
++        case "$vistos" in
++        *" $uid "*) continue ;;
++        esac
++        amb=$(tr '\0' '\n' 2>/dev/null <"$f") || continue
++        wd=$(echo "$amb" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n 1)
++        dp=$(echo "$amb" | sed -n 's/^DISPLAY=//p' | head -n 1)
++        rt=$(echo "$amb" | sed -n 's/^XDG_RUNTIME_DIR=//p' | head -n 1)
++        rt=${rt:-/run/user/$uid}
++        # O socket da tela tem que existir: um processo que sobrou de uma
++        # sessao que ja acabou (ou um ssh -X, DISPLAY=localhost:10) nao conta.
++        if [ -n "$wd" ]; then
++            case "$wd" in
++            /*) test -S "$wd" ;;
++            *) test -S "$rt/$wd" ;;
++            esac || continue
++        else
++            case "$dp" in
++            :*) ;;
++            *) continue ;;
++            esac
++            n=${dp#:}
++            n=${n%%.*}
++            test -S "/tmp/.X11-unix/X$n" || continue
++        fi
++        vistos="$vistos$uid "
++        stat -c %U "/proc/$pid" 2>/dev/null
++    done | sort -u
 +}
 +
 +# VoidBR patch: "Diagnosticar cliente" da interface do servidor. Roda o
@@ -2474,7 +2575,7 @@ index d54ba3b..ff727d2 100644
  # Execute a command in the background and optionally print its pid.
  # For internal use. Parameters:
  # [-p]   = print the pid.
-@@ -260,17 +613,27 @@ shutdown() {
+@@ -260,17 +674,27 @@ shutdown() {
  # $2 = thumbshot height.
  thumbshot() {
      # TODO: remove compatibility fallback after a few versions
@@ -2504,7 +2605,7 @@ index d54ba3b..ff727d2 100644
      fi
  }
  
-@@ -378,19 +741,251 @@ message() {
+@@ -378,19 +802,251 @@ message() {
      fi
  }
  
@@ -2758,7 +2859,7 @@ index d54ba3b..ff727d2 100644
  }
  
  # Deactivate the screensaver, in order for the users to watch a broadcast.
-@@ -468,7 +1063,7 @@ receive_broadcast() {
+@@ -468,7 +1124,7 @@ receive_broadcast() {
  # The vnc clients should automatically exit when the server is killed.
  # Unfortunately, that isn't always true, so try to kill them anyway.
  stop_receptions() {
@@ -2767,7 +2868,7 @@ index d54ba3b..ff727d2 100644
  
      unset receiving_broadcast
      ensure_display
-@@ -477,6 +1072,14 @@ stop_receptions() {
+@@ -477,6 +1133,14 @@ stop_receptions() {
          kill "$pid"
          xprop_unset EPOPTES_VNCVIEWER_PID
      fi
@@ -2782,7 +2883,7 @@ index d54ba3b..ff727d2 100644
  }
  
  # Open a root terminal inside the X session.
-@@ -507,7 +1110,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
+@@ -507,7 +1171,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
  # exit automatically, so tell it to exit as soon as X is unavailable.
  ping() {
      if [ "$UID" -gt 0 ]; then
@@ -2797,7 +2898,7 @@ index d54ba3b..ff727d2 100644
      fi
      if [ "$receiving_broadcast" = true ]; then
          reset_screensaver
-@@ -533,6 +1142,29 @@ info
+@@ -533,6 +1203,29 @@ info
  # Prevent dbus from getting autolaunched (issue #66)
  export "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/dev/null}"
  
