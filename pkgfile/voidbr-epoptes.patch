@@ -1631,17 +1631,17 @@ index 7a2ee2a..f84e962 100755
  if [ -s "$servercrt" ] || [ "$cert_param" = "verify=0" ]; then
 diff --git a/usr/share/epoptes-client/session-watch b/usr/share/epoptes-client/session-watch
 new file mode 100755
-index 0000000..467b8de
+index 0000000..6985f9d
 --- /dev/null
 +++ b/usr/share/epoptes-client/session-watch
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,169 @@
 +#!/bin/sh
 +# -*- coding: utf-8 -*-
 +#
 +#  session-watch — VoidBR: sobe a conexao da sessao do epoptes-client quando
 +#                  o ambiente grafico nao roda o autostart do XDG
 +#  Created: qua 25 nov 2026 10:55:00 -04
-+#  Updated: qui 26 nov 2026 22:29:07 -04
++#  Updated: qui 26 nov 2026 22:33:04 -04
 +#
 +#  Copyright (c) 2026, Vilmar Catafesta <vcatafesta@gmail.com>
 +#  SPDX-License-Identifier: GPL-3.0-or-later
@@ -1659,7 +1659,7 @@ index 0000000..467b8de
 +# Uso: session-watch <pid>   (sai quando o processo <pid> terminar)
 +# Desligar: SESSION_WATCH=false em /etc/default/epoptes-client
 +
-+_VERSION_="1.0.1-20261126"
++_VERSION_="1.0.2-20261126"
 +
 +pai=$1
 +interval=${SESSION_WATCH_INTERVAL:-10}
@@ -1678,7 +1678,15 @@ index 0000000..467b8de
 +    kill "$(cat "$state/pid")" 2>/dev/null
 +fi
 +echo $$ >"$state/pid"
-+trap 'rm -f "$state/pid"; exit 0' INT TERM
++
++# Apaga o arquivo do PID so se ainda for o deste vigia. No reinicio do
++# servico o vigia novo grava o PID dele e encerra este; sem a conferencia,
++# este apagava o arquivo do novo, que ficava sem poder ser encerrado no
++# reinicio seguinte (dois vigias) e o --check o dava como parado.
++apaga_pid() {
++    test "$(cat "$state/pid" 2>/dev/null)" = "$$" && rm -f "$state/pid"
++}
++trap 'apaga_pid; exit 0' INT TERM
 +
 +uid_min=$(awk '$1 == "UID_MIN" { print $2; exit }' /etc/login.defs 2>/dev/null)
 +uid_min=${uid_min:-1000}
@@ -1744,19 +1752,20 @@ index 0000000..467b8de
 +    fi
 +    home=$(getent passwd "$local_user" | cut -d: -f6)
 +    log "sessao grafica de $local_user sem conexao: iniciando o epoptes-client da sessao"
-+    # shellcheck disable=SC2046
-+    setsid -f setpriv --reuid="$(id -u "$local_user")" --regid="$(id -g "$local_user")" --init-groups \
-+        env -i HOME="$home" USER="$local_user" LOGNAME="$local_user" \
++    # O ambiente vai em "$@", um item por variavel: um valor com espaco (um
++    # XAUTHORITY em pasta com espaco, por exemplo) nao se parte em dois.
++    set -- HOME="$home" USER="$local_user" LOGNAME="$local_user" \
 +        SHELL="$(getent passwd "$local_user" | cut -d: -f7)" \
 +        PATH="/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin" \
-+        XDG_RUNTIME_DIR="$rt" \
-+        $(for v in WAYLAND_DISPLAY DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS \
-+            XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE \
-+            XDG_SESSION_ID DESKTOP_SESSION LANG LANGUAGE LC_ALL; do
-+            val=$(env_of "$local_pid" "$v")
-+            test -n "$val" && printf '%s=%s\n' "$v" "$val"
-+        done) \
-+        "$client" </dev/null >/dev/null 2>&1
++        XDG_RUNTIME_DIR="$rt"
++    for v in WAYLAND_DISPLAY DISPLAY XAUTHORITY DBUS_SESSION_BUS_ADDRESS \
++        XDG_CURRENT_DESKTOP XDG_SESSION_DESKTOP XDG_SESSION_TYPE \
++        XDG_SESSION_ID DESKTOP_SESSION LANG LANGUAGE LC_ALL; do
++        val=$(env_of "$local_pid" "$v")
++        test -n "$val" && set -- "$@" "$v=$val"
++    done
++    setsid -f setpriv --reuid="$(id -u "$local_user")" --regid="$(id -g "$local_user")" --init-groups \
++        env -i "$@" "$client" </dev/null >/dev/null 2>&1
 +}
 +
 +while kill -0 "$pai" 2>/dev/null; do
@@ -1794,7 +1803,7 @@ index 0000000..467b8de
 +    done
 +    sleep "$interval"
 +done
-+rm -f "$state/pid"
++apaga_pid
 diff --git a/usr/share/epoptes-client/thumbshot.py b/usr/share/epoptes-client/thumbshot.py
 index 557829c..eeadacc 100755
 --- a/usr/share/epoptes-client/thumbshot.py
