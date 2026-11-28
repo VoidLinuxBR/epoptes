@@ -133,9 +133,15 @@ Parando o mouse sobre uma máquina aparece uma dica com IP, MAC, versão do clie
 
 Nos menus, Observar é **Monitorar usuário** e Assistir é **Auxiliar usuário**; o duplo clique numa máquina é o Auxiliar usuário. Observar só mostra a tela do aluno; Assistir deixa usar o mouse e o teclado dele. Funciona em X11 (x11vnc), em Hyprland, Sway e outros compositores wlroots (wayvnc) e no GNOME com Wayland (servidor VNC do próprio GNOME; veja abaixo). Antes de abrir, o epoptes avisa as máquinas que não têm como atender e por quê, e as deixa de fora.
 
+### Barra de ferramentas
+
+Os botões ficam em grupos, com o nome em cima: Ver o aluno (Observar, Assistir), Transmitir (Transmitir tela, Parar), Comunicar (Mensagem, Executar, Terminal root), Restringir (Bloquear, Desbloquear), Cliente (Informações, Diagnosticar, Reconectar sessão), Energia (Ligar, Encerrar sessão, Reiniciar, Desligar) e Epoptes (Configurações). Diagnosticar só fica ativo com uma máquina selecionada; Reconectar sessão, só se ela tiver conexão de sessão.
+
+A seta ao lado do botão de parar tem duas opções: **Parar em todos os alunos** (o mesmo que clicar no botão) e **Parar só nos selecionados**, em que a transmissão continua nos outros. Quando o último aluno para de receber, o servidor da transmissão desliga sozinho.
+
 ### Zoom
 
-Os botões A−, 100% e A+, à direita da barra de ferramentas, e os atalhos Ctrl +, Ctrl − e Ctrl 0 aumentam e diminuem a fonte e os ícones de todas as janelas do epoptes, de 70% a 200%. O tamanho escolhido fica salvo (font_scale em ~/.config/epoptes/settings).
+Os itens Aumentar fonte, Diminuir fonte e Tamanho normal, no menu Configurações, e os atalhos Ctrl +, Ctrl − e Ctrl 0 aumentam e diminuem a fonte e os ícones de todas as janelas do epoptes, de 70% a 200%. O tamanho escolhido fica salvo (font_scale em ~/.config/epoptes/settings).
 
 ### Configurações
 
@@ -164,7 +170,7 @@ Ajuda > Manual do VoidBR (ou F1) mostra este texto. Ajuda > Sobre mostra os cré
 | X11 (qualquer ambiente) | sim | sim (x11vnc) |
 | Hyprland, Sway, river, labwc | sim (grim) | sim (wayvnc) |
 | GNOME com Wayland | a cada 60 s (portal) | sim (VNC do GNOME) |
-| KDE Plasma com Wayland | spectacle (não testado) | não |
+| KDE Plasma com Wayland | sim (spectacle) | não (veja abaixo) |
 
 As outras funções (mensagem, bloquear tela, terminal) seguem o Epoptes original e não foram testadas no Wayland.
 
@@ -184,7 +190,7 @@ Os alunos não mudam nada: recebem a transmissão do mesmo jeito que de um profe
 | X11 | x11vnc |
 | GNOME com Wayland | x11vnc, gnome-remote-desktop, libsecret (secret-tool) |
 | Hyprland, Sway e outros wlroots | x11vnc, wayvnc |
-| KDE Plasma com Wayland | não funciona |
+| KDE Plasma com Wayland | não funciona (veja KDE Plasma com Wayland) |
 
 - No GNOME, enquanto transmite, aparece no canto superior direito do professor o indicador de tela compartilhada. Clicar nele para parar encerra a transmissão.
 - Se o compartilhamento de tela do GNOME já estiver ligado (Configurações > Sistema > Área de trabalho remota), a transmissão não abre; desligue-o antes.
@@ -259,6 +265,19 @@ O Observar/Assistir precisa do chaveiro do GNOME (gnome-keyring) rodando, porque
 - Se o aluno já estiver com o compartilhamento de tela do GNOME ligado (Configurações > Compartilhamento), o Observar não abre, porque os dois disputam o mesmo serviço.
 - O visualizador do servidor só recebe a senha sozinho se for o TigerVNC; outros visualizadores pedem a senha.
 - O grdctl (a ferramenta do gnome-remote-desktop) cai com "falha de segmentação" no Void, que não tem systemd. O Epoptes não o usa: configura pelo gsettings e guarda a senha pelo secret-tool.
+
+## KDE Plasma com Wayland
+
+| Função | Situação |
+|---|---|
+| Miniatura | funciona, pelo spectacle (testado) |
+| Observar e Assistir | não funciona |
+| Transmitir tela com o professor no Plasma | não funciona |
+
+O Plasma não deixa o wayvnc capturar a tela e não tem um servidor VNC próprio como o do GNOME. O servidor VNC do KDE, o krfb, no Wayland passa pelo portal de captura de tela, e o portal pede aprovação na máquina, numa janela "Controle remoto solicitado", a cada vez que ele sobe; a opção de acesso sem supervisão do krfb não evita isso. No Void, sem systemd, o portal ainda não identifica o programa ("aplicativo não identificado"), então nem a pré-autorização pelo nome do programa vale. Nos testes, a porta VNC não abriu sem essa aprovação, e a janela nem sempre aparecia para ser clicada. Numa sala de aula o Epoptes não pode depender de alguém aprovar em cada máquina, então o Observar, o Assistir e a transmissão ficam de fora no Plasma Wayland. Numa sessão Plasma X11 tudo funciona, pelo x11vnc.
+
+- Para a miniatura, o cliente precisa do spectacle (dependência do pacote do cliente).
+- Se o portal não oferecer a captura de tela no Plasma, confira se não há um ~/.config/xdg-desktop-portal/portals.conf feito para outro ambiente (por exemplo, com default=gtk;wlr, para o Hyprland). Esse arquivo vale para todos os ambientes e passa por cima do kde-portals.conf do Plasma. Renomeie-o para o nome do ambiente a que se destina (hyprland-portals.conf, sway-portals.conf...) ou remova-o, e saia e entre de novo na sessão.
 
 ## Diagnóstico no cliente
 
