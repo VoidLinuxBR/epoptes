@@ -83,10 +83,10 @@ index ac7b570..848abb8 100755
      path = os.path.expanduser('~/.config')
      if not os.path.isdir(path):
 diff --git a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-index 720c958..42b3167 100644
+index 720c958..a5da712 100644
 --- a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 +++ b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-@@ -4,10 +4,65 @@
+@@ -4,10 +4,66 @@
  # SPDX-License-Identifier: GPL-3.0-or-later
  """
  Epoptes GUI class.
@@ -113,7 +113,8 @@ index 720c958..42b3167 100644
 +  6. Item "Reconectar sessao": refaz a conexao da sessao (reconnect);
 +     numa conexao duplicada, so encerra a escolhida (reconnect drop).
 +  7. Zoom da fonte da interface, como nos voidbr-*-tweaks: botoes A-,
-+     100% e A+ no fim da barra de ferramentas e Ctrl +, Ctrl - e Ctrl 0.
++     100% e A+ no grupo Epoptes da barra (ao lado de Configuracoes), os
++     itens do menu Configuracoes e Ctrl +, Ctrl - e Ctrl 0.
 +     Vai de 70% a 200%, em passos de 10%, vale para todas as janelas
 +     do epoptes e fica salvo em font_scale, na secao [GUI] do settings.
 +     Os icones crescem junto: os de arquivo sao redesenhados a partir do
@@ -153,7 +154,7 @@ index 720c958..42b3167 100644
  import random
  import socket
  import string
-@@ -21,13 +76,16 @@ from epoptes.ui.about import About
+@@ -21,13 +77,16 @@ from epoptes.ui.about import About
  from epoptes.ui.benchmark import Benchmark
  from epoptes.ui.client_information import ClientInformation
  from epoptes.ui.common import gettext as _
@@ -171,7 +172,7 @@ index 720c958..42b3167 100644
  
  
  class EpoptesGui(object):
-@@ -77,8 +135,17 @@ class EpoptesGui(object):
+@@ -77,8 +136,17 @@ class EpoptesGui(object):
          self.vncserver = None
          self.vncserver_port = None
          self.vncserver_pwd = None
@@ -189,7 +190,7 @@ index 720c958..42b3167 100644
  
          self.builder = Gtk.Builder()
          self.builder.add_from_file('epoptes.ui')
-@@ -98,7 +165,11 @@ class EpoptesGui(object):
+@@ -98,7 +166,11 @@ class EpoptesGui(object):
          self.set_labels_order(1, 0, None)
          self.icv_clients.set_model(self.cstore)
          self.icv_clients.set_pixbuf_column(C_PIXBUF)
@@ -202,7 +203,7 @@ index 720c958..42b3167 100644
          self.cstore.set_sort_column_id(C_LABEL, Gtk.SortType.ASCENDING)
          self.on_icv_clients_selection_changed(None)
          self.icv_clients.enable_model_drag_source(
-@@ -167,6 +238,14 @@ class EpoptesGui(object):
+@@ -167,6 +239,14 @@ class EpoptesGui(object):
          mitem.set_active(True)
          self.get('cmi_show_real_names').set_active(self.show_real_names)
          self.mainwin.set_sensitive(False)
@@ -217,7 +218,7 @@ index 720c958..42b3167 100644
  
      def save_settings(self):
          """Helper function for on_imi_file_quit_activate."""
-@@ -187,8 +266,7 @@ class EpoptesGui(object):
+@@ -187,8 +267,7 @@ class EpoptesGui(object):
      def on_imi_file_quit_activate(self, _widget):
          """Handle imi_file_quit.activate and wnd_main.destroy events."""
          self.save_settings()
@@ -227,7 +228,7 @@ index 720c958..42b3167 100644
          if self.vncviewer is not None:
              self.vncviewer.kill()
          # noinspection PyUnresolvedReferences
-@@ -276,38 +354,92 @@ class EpoptesGui(object):
+@@ -276,38 +355,92 @@ class EpoptesGui(object):
  
      def reverse_connection(self, cmd, *args):
          """Helper function for on_imi_broadcasts_*_activate."""
@@ -350,7 +351,7 @@ index 720c958..42b3167 100644
  
      def on_imi_broadcasts_monitor_user_activate(self, _widget):
          """Handle imi_sbroadcasts_monitor_user.activate event."""
-@@ -323,6 +455,9 @@ class EpoptesGui(object):
+@@ -323,6 +456,9 @@ class EpoptesGui(object):
  
      def broadcast_screen(self, fullscreen=''):
          """Helper function for on_imi_broadcasts_broadcast_screen*_activate."""
@@ -360,7 +361,7 @@ index 720c958..42b3167 100644
          if self.vncserver is None:
              pwdfile = config.expand_filename('vncpasswd')
              pwd = ''.join(random.sample(
-@@ -332,11 +467,18 @@ class EpoptesGui(object):
+@@ -332,11 +468,18 @@ class EpoptesGui(object):
                  pwd = file.read()
              self.vncserver_port = self.find_unused_port()
              self.vncserver_pwd = ''.join('\\%o' % c for c in pwd)
@@ -384,7 +385,7 @@ index 720c958..42b3167 100644
          # Running `xdg-screensaver reset` as root doesn't reset the D.E.
          # screensaver, so send the reset command to both epoptes processes
          self.exec_on_selected_clients(
-@@ -344,6 +486,66 @@ class EpoptesGui(object):
+@@ -344,6 +487,66 @@ class EpoptesGui(object):
          self.exec_on_selected_clients(
              'receive_broadcast "${GUI_IP}:%d" "%s" %s' % (self.vncserver_port,
              self.vncserver_pwd, fullscreen), mode=EM_SYSTEM_OR_SESSION)
@@ -451,7 +452,7 @@ index 720c958..42b3167 100644
  
      def on_imi_broadcasts_broadcast_screen_fullscreen_activate(self, _widget):
          """Handle imi_broadcasts_broadcast_screen_fullscreen.activate event."""
-@@ -357,9 +559,27 @@ class EpoptesGui(object):
+@@ -357,9 +560,27 @@ class EpoptesGui(object):
          """Handle imi_broadcasts_stop_broadcasts.activate event."""
          self.exec_on_clients(['stop_receptions'], self.cstore,
                               mode=EM_SYSTEM_AND_SESSION)
@@ -482,7 +483,7 @@ index 720c958..42b3167 100644
  
      # TODO: Should we allow for running arbitrary commands in clients?
      def on_imi_execute_execute_command_activate(self, _widget):
-@@ -504,6 +724,100 @@ class EpoptesGui(object):
+@@ -504,6 +725,100 @@ class EpoptesGui(object):
          subprocess.Popen('./remote_assistance.py',
                           cwd='/usr/share/epoptes-client')
  
@@ -583,7 +584,7 @@ index 720c958..42b3167 100644
      def on_imi_help_about_activate(self, _widget):
          """Handle imi_help_about_activate.activate event."""
          if not self.about:
-@@ -629,6 +943,12 @@ class EpoptesGui(object):
+@@ -629,6 +944,12 @@ class EpoptesGui(object):
              single_client = True
          self.get('imi_clients_information').set_sensitive(single_client)
          self.get('tlb_clients_information').set_sensitive(single_client)
@@ -596,7 +597,7 @@ index 720c958..42b3167 100644
  
          if selected:
              self.get('mni_add_to_group').set_sensitive(True)
-@@ -764,6 +1084,9 @@ class EpoptesGui(object):
+@@ -764,6 +1085,9 @@ class EpoptesGui(object):
                  client_.set_offline()
  
          LOG.w("Disconnect from", handle)
@@ -606,7 +607,7 @@ index 720c958..42b3167 100644
          client = None
          for client in structs.clients:
              if client.hsystem == handle:
-@@ -813,12 +1136,12 @@ class EpoptesGui(object):
+@@ -813,12 +1137,12 @@ class EpoptesGui(object):
          if client.users:
              for hsession, user in client.users.items():
                  self.cstore.append(
@@ -621,7 +622,7 @@ index 720c958..42b3167 100644
                   self.imagetypes[client.type], client, ''])
  
      def fill_icon_view(self, group, keep_selection=False):
-@@ -923,9 +1246,11 @@ class EpoptesGui(object):
+@@ -923,9 +1247,11 @@ class EpoptesGui(object):
  
          # Update/fill the client information
          client.type, client.hostname = type_, host
@@ -633,7 +634,7 @@ index 720c958..42b3167 100644
          else:
              # This is a user epoptes-client
              client.add_user(user, name, handle)
-@@ -949,7 +1274,712 @@ class EpoptesGui(object):
+@@ -949,7 +1275,743 @@ class EpoptesGui(object):
              user = row[C_INSTANCE].users[row[C_SESSION_HANDLE]][label]
          else:
              user = ''
@@ -684,6 +685,28 @@ index 720c958..42b3167 100644
 +            item.get_child().set_accel(tecla, Gdk.ModifierType.CONTROL_MASK)
 +            menu.append(item)
 +        menu.show_all()
++        # VoidBR patch: os mesmos A-, 100% e A+ tambem na barra, no grupo
++        # Epoptes, ao lado de Configuracoes. O do meio mostra o tamanho atual
++        # e volta ao normal.
++        grupo = self.get('tlb_settings').get_parent()
++        caixa = Gtk.Box()
++        caixa.get_style_context().add_class('linked')
++        self.b_menor = Gtk.Button(label='A\u2212',
++                                  tooltip_text='Diminuir a fonte (Ctrl -)')
++        self.b_escala = Gtk.Button(label='100%',
++                                   tooltip_text='Tamanho normal (Ctrl 0)')
++        self.b_maior = Gtk.Button(label='A+',
++                                  tooltip_text='Aumentar a fonte (Ctrl +)')
++        for btn, passo in ((self.b_menor, -1), (self.b_escala, 0),
++                           (self.b_maior, 1)):
++            btn.set_relief(Gtk.ReliefStyle.NONE)
++            btn.set_valign(Gtk.Align.CENTER)
++            btn.connect('clicked', lambda _b, p=passo: self.mudar_fonte(p))
++            caixa.pack_start(btn, False, False, 0)
++        item = Gtk.ToolItem()
++        item.add(caixa)
++        grupo.insert(item, -1)
++        item.show_all()
 +        self.mainwin.connect('key-press-event', self.on_font_zoom_key)
 +        self.icones_zoom = self.find_zoom_icons()
 +        # Imagens de tema (stock/icon_name) de qualquer janela: original de
@@ -697,6 +720,7 @@ index 720c958..42b3167 100644
 +        # recebe o mesmo zoom, inclusive os atalhos.
 +        GObject.add_emission_hook(Gtk.Window, 'map', self.on_window_map)
 +        self.aplicar_fonte()
++        self.mostrar_escala()
 +
 +    def ajustar_grupos(self, antiga, nova):
 +        """Scale the groups column width, keeping any manual adjustment."""
@@ -858,12 +882,20 @@ index 720c958..42b3167 100644
 +            return
 +        self.definir_escala(nova)
 +
++    def mostrar_escala(self):
++        """Show the current font scale on the toolbar buttons and disable
++        the ones that reached a limit."""
++        self.b_escala.set_label('%d%%' % round(self.escala_fonte * 100))
++        self.b_menor.set_sensitive(self.escala_fonte > ESCALA_MIN)
++        self.b_maior.set_sensitive(self.escala_fonte < ESCALA_MAX)
++
 +    def definir_escala(self, nova):
 +        """Apply and save a font scale (0.7 to 2.0)."""
 +        nova = min(ESCALA_MAX, max(ESCALA_MIN, round(nova, 2)))
 +        self.ajustar_grupos(self.escala_fonte, nova)
 +        self.escala_fonte = nova
 +        self.aplicar_fonte()
++        self.mostrar_escala()
 +        self.salvar_config('font_scale', nova)
 +
 +    @staticmethod
@@ -1347,7 +1379,7 @@ index 720c958..42b3167 100644
  
      def calculate_label(self, client, username=''):
          """Return the iconview label from a hostname/alias and a username,
-@@ -1000,6 +2030,21 @@ class EpoptesGui(object):
+@@ -1000,6 +2062,21 @@ class EpoptesGui(object):
              del self.current_thumbshots[handle]
          return False
  
@@ -1369,7 +1401,7 @@ index 720c958..42b3167 100644
      def got_thumbshot(self, handle, reply):
          """Callback after running`thumbshot` on a client."""
          for i in self.cstore:
-@@ -1007,11 +2052,21 @@ class EpoptesGui(object):
+@@ -1007,11 +2084,21 @@ class EpoptesGui(object):
                  # Ask for a new thumbshot THUMBSHOT_MS msec after the last one.
                  # So if the client is too stressed and needs e.g. 7 secs to
                  # send a thumbshot, we'll ask for one every 12 secs.
@@ -1392,7 +1424,7 @@ index 720c958..42b3167 100644
                  try:
                      rowstride, size, pixels = reply.split(b'\n', 2)
                      rowstride = int(rowstride)
-@@ -1059,7 +2114,7 @@ class EpoptesGui(object):
+@@ -1059,7 +2146,7 @@ class EpoptesGui(object):
          # ${GUI_PY} must be unquoted, don't pass it as list
          if isinstance(command, list) and len(command) > 0:
              command = '%s %s' % (command[0], ' '.join(
@@ -2293,7 +2325,7 @@ index 557829c..eeadacc 100755
  
  def main():
 diff --git a/usr/share/epoptes/LEIAME.md b/usr/share/epoptes/LEIAME.md
-index ba9679d..74b4fa7 100644
+index ba9679d..bdf19ae 100644
 --- a/usr/share/epoptes/LEIAME.md
 +++ b/usr/share/epoptes/LEIAME.md
 @@ -68,7 +68,7 @@ Depois, em cada cliente:
@@ -2314,7 +2346,7 @@ index ba9679d..74b4fa7 100644
  
  ### Menu Clientes
  
-@@ -129,13 +129,13 @@ Parando o mouse sobre uma máquina aparece uma dica com IP, MAC, versão do clie
+@@ -129,19 +129,19 @@ Parando o mouse sobre uma máquina aparece uma dica com IP, MAC, versão do clie
  - **Reconectar sessão** refaz a conexão da sessão da máquina selecionada: ela some da lista por alguns segundos e volta. Numa sessão duplicada, só encerra a conexão escolhida; a dica diz qual é a mais antiga (a que deve ficar).
  - **Informações** e **Desempenho da rede** são as do Epoptes original.
  
@@ -2330,6 +2362,13 @@ index ba9679d..74b4fa7 100644
 +Os botões ficam em grupos, com o nome em cima: Ver o aluno (Monitorar usuário, Auxiliar usuário), Transmitir (Transmitir tela, Parar), Comunicar (Mensagem, Executar, Terminal root), Restringir (Bloquear, Desbloquear), Cliente (Informações, Diagnosticar, Reconectar sessão), Energia (Ligar, Encerrar sessão, Reiniciar, Desligar) e Epoptes (Configurações). Diagnosticar só fica ativo com uma máquina selecionada; Reconectar sessão, só se ela tiver conexão de sessão.
  
  A seta ao lado do botão de parar tem duas opções: **Parar em todos os alunos** (o mesmo que clicar no botão) e **Parar só nos selecionados**, em que a transmissão continua nos outros. Quando o último aluno para de receber, o servidor da transmissão desliga sozinho.
+ 
+ ### Zoom
+ 
+-Os itens Aumentar fonte, Diminuir fonte e Tamanho normal, no menu Configurações, e os atalhos Ctrl +, Ctrl − e Ctrl 0 aumentam e diminuem a fonte e os ícones de todas as janelas do epoptes, de 70% a 200%. O tamanho escolhido fica salvo (font_scale em ~/.config/epoptes/settings).
++Os botões A−, 100% e A+ da barra (no grupo Epoptes, ao lado de Configurações; o do meio mostra o tamanho atual e volta ao normal), os itens Aumentar fonte, Diminuir fonte e Tamanho normal, no menu Configurações, e os atalhos Ctrl +, Ctrl − e Ctrl 0 aumentam e diminuem a fonte e os ícones de todas as janelas do epoptes, de 70% a 200%. O tamanho escolhido fica salvo (font_scale em ~/.config/epoptes/settings).
+ 
+ ### Configurações
  
 @@ -165,12 +165,12 @@ Ajuda > Manual do VoidBR (ou F1) mostra este texto. Ajuda > Sobre mostra os cré
  
