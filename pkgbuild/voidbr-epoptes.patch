@@ -1802,17 +1802,17 @@ index 7a2ee2a..f84e962 100755
  if [ -s "$servercrt" ] || [ "$cert_param" = "verify=0" ]; then
 diff --git a/usr/share/epoptes-client/session-watch b/usr/share/epoptes-client/session-watch
 new file mode 100755
-index 0000000..6985f9d
+index 0000000..34bcb62
 --- /dev/null
 +++ b/usr/share/epoptes-client/session-watch
-@@ -0,0 +1,169 @@
+@@ -0,0 +1,203 @@
 +#!/bin/sh
 +# -*- coding: utf-8 -*-
 +#
 +#  session-watch — VoidBR: sobe a conexao da sessao do epoptes-client quando
 +#                  o ambiente grafico nao roda o autostart do XDG
 +#  Created: qua 25 nov 2026 10:55:00 -04
-+#  Updated: qui 26 nov 2026 22:33:04 -04
++#  Updated: sáb 28 nov 2026 08:02:23 -04
 +#
 +#  Copyright (c) 2026, Vilmar Catafesta <vcatafesta@gmail.com>
 +#  SPDX-License-Identifier: GPL-3.0-or-later
@@ -1830,7 +1830,7 @@ index 0000000..6985f9d
 +# Uso: session-watch <pid>   (sai quando o processo <pid> terminar)
 +# Desligar: SESSION_WATCH=false em /etc/default/epoptes-client
 +
-+_VERSION_="1.0.2-20261126"
++_VERSION_="1.0.3-20261128"
 +
 +pai=$1
 +interval=${SESSION_WATCH_INTERVAL:-10}
@@ -1866,10 +1866,41 @@ index 0000000..6985f9d
 +    echo "epoptes-client session-watch: $*" >&2
 +}
 +
++# A tela do ambiente $1 (texto do environ, uma variavel por linha) ainda
++# existe? Confere o socket do WAYLAND_DISPLAY ou o do X do DISPLAY.
++tela_viva() {
++    local wd dp rt n
++
++    wd=$(echo "$1" | sed -n 's/^WAYLAND_DISPLAY=//p' | head -n 1)
++    dp=$(echo "$1" | sed -n 's/^DISPLAY=//p' | head -n 1)
++    rt=$(echo "$1" | sed -n 's/^XDG_RUNTIME_DIR=//p' | head -n 1)
++    if [ -n "$wd" ]; then
++        case "$wd" in
++        /*) test -S "$wd" ;;
++        *) test -n "$rt" && test -S "$rt/$wd" ;;
++        esac
++        return
++    fi
++    case "$dp" in
++    :*)
++        n=${dp#:}
++        n=${n%%.*}
++        test -S "/tmp/.X11-unix/X$n"
++        return
++        ;;
++    esac
++    return 1
++}
++
 +# Imprime "usuario pid" de um processo por usuario com sessao grafica local:
 +# WAYLAND_DISPLAY ou DISPLAY=:N no ambiente, sem SSH_CONNECTION (ssh -X nao
-+# e sessao da tela). Do mais antigo para o mais novo: fica o primeiro, que
-+# normalmente e o proprio compositor ou a sessao.
++# e sessao da tela), e com a tela ainda existindo. Do mais antigo para o mais
++# novo: fica o primeiro, que normalmente e o proprio compositor ou a sessao.
++# A conferencia da tela e aqui, e nao so na hora de subir: sem systemd, um
++# processo que sobrou de uma sessao anterior (que ja saiu) continua com o
++# WAYLAND_DISPLAY antigo e, por ser o mais velho, era o escolhido; o launch
++# via que o socket nao existia e desistia calado, a cada volta, e a sessao
++# nova ficava para sempre sem conexao.
 +graphical_sessions() {
 +    ps -e --sort=start_time -o uid=,user:32=,pid= |
 +        while read -r uid user pid; do
@@ -1882,6 +1913,7 @@ index 0000000..6985f9d
 +            *SSH_CONNECTION=*) continue ;;
 +            esac
 +            echo "$env" | grep -Eq '^(WAYLAND_DISPLAY=.|DISPLAY=:)' || continue
++            tela_viva "$env" || continue
 +            echo "$user $pid"
 +        done | awk '!visto[$1]++'
 +}
@@ -1910,7 +1942,9 @@ index 0000000..6985f9d
 +    dp=$(env_of "$local_pid" DISPLAY)
 +    rt=$(env_of "$local_pid" XDG_RUNTIME_DIR)
 +    test -n "$rt" || rt=/run/user/$(id -u "$local_user")
-+    # Ambiente de outra sessao que ja acabou (socket sumiu): nao sobe nada
++    # Ambiente de outra sessao que ja acabou (socket sumiu): nao sobe nada.
++    # O graphical_sessions ja pula esses; aqui so cobre a sessao que acabou
++    # entre a busca e a subida.
 +    if [ -n "$wd" ]; then
 +        case "$wd" in
 +        /*) test -S "$wd" ;;
