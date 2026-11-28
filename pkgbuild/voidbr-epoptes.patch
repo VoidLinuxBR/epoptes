@@ -2259,7 +2259,7 @@ index 557829c..eeadacc 100755
  
  def main():
 diff --git a/usr/share/epoptes/LEIAME.md b/usr/share/epoptes/LEIAME.md
-index ba9679d..2e87c02 100644
+index ba9679d..74b4fa7 100644
 --- a/usr/share/epoptes/LEIAME.md
 +++ b/usr/share/epoptes/LEIAME.md
 @@ -68,7 +68,7 @@ Depois, em cada cliente:
@@ -2312,16 +2312,24 @@ index ba9679d..2e87c02 100644
  
  As outras funções (mensagem, bloquear tela, terminal) seguem o Epoptes original e não foram testadas no Wayland.
  
-@@ -190,7 +190,7 @@ Os alunos não mudam nada: recebem a transmissão do mesmo jeito que de um profe
+@@ -180,6 +180,7 @@ No X11, o Epoptes transmite a tela do professor com o x11vnc, que lê a tela do
+ 
+ 1. sobe um servidor VNC local, só de visualização, que lê a tela Wayland:
+    - **GNOME**: o servidor VNC do próprio GNOME (gnome-remote-desktop), com uma senha descartável guardada na coleção "session" do chaveiro;
++   - **KDE Plasma**: o krfb do VoidBR (com o patch do portal), com uma configuração própria e uma senha descartável, sem mexer no ~/.config/krfbrc nem na carteira do professor;
+    - **Hyprland, Sway e outros wlroots**: o wayvnc, escutando só em 127.0.0.1;
+ 2. sobe o x11vnc no modo repetidor (-reflect), que é o único visualizador desse servidor local e repassa a tela a todos os alunos, com a porta e a senha de sempre do Epoptes.
+ 
+@@ -190,7 +191,7 @@ Os alunos não mudam nada: recebem a transmissão do mesmo jeito que de um profe
  | X11 | x11vnc |
  | GNOME com Wayland | x11vnc, gnome-remote-desktop, libsecret (secret-tool) |
  | Hyprland, Sway e outros wlroots | x11vnc, wayvnc |
 -| KDE Plasma com Wayland | não funciona (veja KDE Plasma com Wayland) |
-+| KDE Plasma com Wayland | ainda não funciona |
++| KDE Plasma com Wayland | x11vnc, krfb (o do VoidBR) |
  
  - No GNOME, enquanto transmite, aparece no canto superior direito do professor o indicador de tela compartilhada. Clicar nele para parar encerra a transmissão.
  - Se o compartilhamento de tela do GNOME já estiver ligado (Configurações > Sistema > Área de trabalho remota), a transmissão não abre; desligue-o antes.
-@@ -199,15 +199,15 @@ Os alunos não mudam nada: recebem a transmissão do mesmo jeito que de um profe
+@@ -199,15 +200,15 @@ Os alunos não mudam nada: recebem a transmissão do mesmo jeito que de um profe
  
  ## GNOME com Wayland
  
@@ -2340,7 +2348,7 @@ index ba9679d..2e87c02 100644
  
  No Void, instale com:
  
-@@ -217,7 +217,7 @@ No Arch/Chili eles aparecem como dependências opcionais do chili-epoptes-client
+@@ -217,7 +218,7 @@ No Arch/Chili eles aparecem como dependências opcionais do chili-epoptes-client
  
      sudo pacman -S --asdeps xdg-desktop-portal-gnome gnome-remote-desktop libsecret
  
@@ -2349,7 +2357,7 @@ index ba9679d..2e87c02 100644
  
  ### Miniatura: o portal de captura
  
-@@ -230,24 +230,24 @@ Eles não são dependência obrigatória do pacote do cliente, porque só servem
+@@ -230,24 +231,24 @@ Eles não são dependência obrigatória do pacote do cliente, porque só servem
  
    Depois, saia e entre de novo na sessão.
  
@@ -2381,7 +2389,7 @@ index ba9679d..2e87c02 100644
  - Para a carteira do KDE nem subir nos clientes que só usam GNOME, tire do PAM do SDDM as linhas do pam_kwallet5, em **/etc/pam.d/sddm** e **/etc/pam.d/sddm-autologin**:
  
          sudo sed -i '/pam_kwallet5\.so/d' /etc/pam.d/sddm /etc/pam.d/sddm-autologin
-@@ -262,7 +262,7 @@ O Observar/Assistir precisa do chaveiro do GNOME (gnome-keyring) rodando, porque
+@@ -262,7 +263,7 @@ O Observar/Assistir precisa do chaveiro do GNOME (gnome-keyring) rodando, porque
  
  ### Outros cuidados
  
@@ -2390,14 +2398,14 @@ index ba9679d..2e87c02 100644
  - O visualizador do servidor só recebe a senha sozinho se for o TigerVNC; outros visualizadores pedem a senha.
  - O grdctl (a ferramenta do gnome-remote-desktop) cai com "falha de segmentação" no Void, que não tem systemd. O Epoptes não o usa: configura pelo gsettings e guarda a senha pelo secret-tool.
  
-@@ -271,10 +271,25 @@ O Observar/Assistir precisa do chaveiro do GNOME (gnome-keyring) rodando, porque
+@@ -271,10 +272,27 @@ O Observar/Assistir precisa do chaveiro do GNOME (gnome-keyring) rodando, porque
  | Função | Situação |
  |---|---|
  | Miniatura | funciona, pelo spectacle (testado) |
 -| Observar e Assistir | não funciona |
 -| Transmitir tela com o professor no Plasma | não funciona |
 +| Monitorar usuário e Auxiliar usuário | funciona, pelo krfb com o patch do VoidBR (testado) |
-+| Transmitir tela com o professor no Plasma | ainda não funciona |
++| Transmitir tela com o professor no Plasma | pelo krfb e o x11vnc -reflect (ainda não testado) |
  
 -O Plasma não deixa o wayvnc capturar a tela e não tem um servidor VNC próprio como o do GNOME. O servidor VNC do KDE, o krfb, no Wayland passa pelo portal de captura de tela, e o portal pede aprovação na máquina, numa janela "Controle remoto solicitado", a cada vez que ele sobe; a opção de acesso sem supervisão do krfb não evita isso. No Void, sem systemd, o portal ainda não identifica o programa ("aplicativo não identificado"), então nem a pré-autorização pelo nome do programa vale. Nos testes, a porta VNC não abriu sem essa aprovação, e a janela nem sempre aparecia para ser clicada. Numa sala de aula o Epoptes não pode depender de alguém aprovar em cada máquina, então o Observar, o Assistir e a transmissão ficam de fora no Plasma Wayland. Até o Plasma 6.7 dava para usar a sessão Plasma X11, em que tudo funciona pelo x11vnc; a partir do Plasma 6.8 a KDE removeu a sessão X11, e o Plasma passou a ser só Wayland.
 +O Plasma não deixa o wayvnc capturar a tela. O Epoptes usa o servidor VNC do próprio KDE, o krfb, que no Wayland captura a tela pelo portal. O portal só libera sem perguntar ao aluno ("Controle remoto solicitado") se souber qual programa está pedindo, e no Void, sem systemd, o krfb original aparece como "aplicativo não identificado". Por isso o cliente precisa do **krfb do VoidBR** (receita em VoidLinuxBR/voidbr-pkgmake, templates/krfb, para Void e Arch), que se identifica no portal como org.kde.krfb.
@@ -2416,10 +2424,12 @@ index ba9679d..2e87c02 100644
 +- Se o aluno já estiver com o krfb aberto, o Monitorar usuário não abre (o krfb só roda uma vez por sessão); feche-o antes.
 +- O registro do krfb fica em $XDG_RUNTIME_DIR/epoptes-client/krfb.log no cliente.
 +- Pacotes no cliente: krfb (do VoidBR), socat e python3.
++- Numa VM, o Plasma com 8 GB de memória ficou lento enquanto a tela era capturada (o Plasma inteiro, não só a imagem remota); com 16 GB ficou normal. Não foi testado ainda numa máquina real.
++- Na transmissão com o professor no Plasma, o krfb captura a tela dele e o x11vnc -reflect a repassa aos alunos, como no GNOME. Enquanto transmite, o Plasma mostra ao professor o ícone de tela compartilhada e o aviso de controle remoto; os alunos só veem (o x11vnc está em -viewonly).
  
  - Para a miniatura, o cliente precisa do spectacle (dependência do pacote do cliente).
  - Se o portal não oferecer a captura de tela no Plasma, confira se não há um ~/.config/xdg-desktop-portal/portals.conf feito para outro ambiente (por exemplo, com default=gtk;wlr, para o Hyprland). Esse arquivo vale para todos os ambientes e passa por cima do kde-portals.conf do Plasma. Renomeie-o para o nome do ambiente a que se destina (hyprland-portals.conf, sway-portals.conf...) ou remova-o, e saia e entre de novo na sessão.
-@@ -301,7 +316,7 @@ Ele confere: arquivos do pacote, serviço habilitado e rodando (runit ou systemd
+@@ -301,7 +319,7 @@ Ele confere: arquivos do pacote, serviço habilitado e rodando (runit ou systemd
  
  **Miniatura falhou.** O motivo aparece na dica. Em Hyprland e Sway é o grim. No GNOME, veja "Miniatura: o portal de captura": falta o xdg-desktop-portal-gnome, a permissão foi negada ou um portals.conf manda o GNOME para outro backend.
  
@@ -2444,17 +2454,17 @@ index 22edcde..9c30a47 100644
      <property name="logo_icon_name">epoptes</property>
 diff --git a/usr/share/epoptes/broadcast-wayland b/usr/share/epoptes/broadcast-wayland
 new file mode 100755
-index 0000000..27f1928
+index 0000000..77f6e9b
 --- /dev/null
 +++ b/usr/share/epoptes/broadcast-wayland
-@@ -0,0 +1,177 @@
+@@ -0,0 +1,253 @@
 +#!/bin/sh
 +# -*- coding: utf-8 -*-
 +#
 +#  broadcast-wayland — VoidBR: "Transmitir tela" com o servidor (professor)
 +#                      numa sessao Wayland
 +#  Created: sex 27 nov 2026 19:11:18 -04
-+#  Updated: sex 27 nov 2026 19:11:18 -04
++#  Updated: sex 27 nov 2026 23:10:41 -04
 +#
 +#  Copyright (c) 2026, Vilmar Catafesta <vcatafesta@gmail.com>
 +#  SPDX-License-Identifier: GPL-3.0-or-later
@@ -2464,6 +2474,8 @@ index 0000000..27f1928
 +#   1. sobe um servidor VNC local, so de visualizacao, que le a tela Wayland:
 +#      - GNOME: o do proprio GNOME (gnome-remote-desktop), com uma senha
 +#        descartavel na colecao "session" do chaveiro;
++#      - KDE Plasma: o krfb (o do VoidBR, com o patch do portal), com uma
++#        configuracao propria e uma senha descartavel;
 +#      - Hyprland, Sway e outros wlroots: o wayvnc, so em 127.0.0.1;
 +#   2. sobe o x11vnc -reflect, que se conecta a esse servidor e repassa a tela
 +#      aos alunos na porta e com a senha de sempre do Epoptes. O servidor do
@@ -2474,7 +2486,7 @@ index 0000000..27f1928
 +# Uso: broadcast-wayland <porta> <arquivo de senha do x11vnc>
 +# Termina (e desfaz tudo) com SIGTERM, ou quando o x11vnc sair.
 +
-+_VERSION_="1.0.0-20261127"
++_VERSION_="1.1.0-20261127"
 +
 +porta=$1
 +senhas=$2
@@ -2485,6 +2497,7 @@ index 0000000..27f1928
 +fonte=
 +xpid=
 +gpid=
++autorizado=
 +
 +erro() {
 +    echo "$*" >&2
@@ -2516,6 +2529,18 @@ index 0000000..27f1928
 +    return 1
 +}
 +
++# Chama o PermissionStore do portal ($1 = metodo, o resto vai como argumentos
++# do dbus-send).
++permission_store() {
++    local metodo="$1"
++
++    shift
++    dbus-send --session --print-reply \
++        --dest=org.freedesktop.impl.portal.PermissionStore \
++        /org/freedesktop/impl/portal/PermissionStore \
++        "org.freedesktop.impl.portal.PermissionStore.$metodo" "$@" 2>/dev/null
++}
++
 +grd_daemon() {
 +    local f
 +
@@ -2545,6 +2570,11 @@ index 0000000..27f1928
 +            done <"$dir/grd-settings"
 +        fi
 +        timeout 30 secret-tool clear xdg:schema "$xdg" epoptes broadcast
++    fi
++    # KDE: tira a autorizacao do krfb no portal, se ela nao existia antes
++    if [ "$fonte" = kde ] && [ -z "$autorizado" ]; then
++        permission_store DeletePermission string:kde-authorized \
++            string:remote-desktop string:org.kde.krfb >/dev/null
 +    fi
 +    fonte=
 +    rm -rf "$dir"
@@ -2592,6 +2622,62 @@ index 0000000..27f1928
 +    gpid=$!
 +    espera_porta "$lporta" "$gpid" ||
 +        erro "o gnome-remote-desktop nao subiu: $(tail -n 5 "$dir/grd.log" 2>/dev/null)"
++    X11VNC_REFLECT_PASSWORD=$senha
++    export X11VNC_REFLECT_PASSWORD
++    ;;
++*:KDE:*)
++    fonte=kde
++    command -v krfb >/dev/null 2>&1 ||
++        erro "falta o pacote krfb no servidor (a transmissao no KDE Plasma usa o krfb do VoidBR, com o patch do portal)"
++    command -v dbus-send >/dev/null 2>&1 || erro "falta o dbus-send no servidor"
++    if pgrep -u "$(id -u)" -x krfb >/dev/null; then
++        fonte=
++        erro "o krfb ja esta aberto nesta sessao; feche-o e tente de novo"
++    fi
++    # Senha descartavel entre o krfb e o x11vnc (8 letras: o limite da senha
++    # VNC). Configuracao propria do krfb (XDG_CONFIG_HOME so dele), sem tocar
++    # no ~/.config/krfbrc nem na carteira do professor: senha no krfbrc
++    # (noWallet), "embaralhada" pelo KStringHandler::obscure (cada caractere
++    # c acima de "!" vira 0x1001F - c), acesso sem confirmacao, a porta local
++    # e sem anuncio na rede. O krfb escuta em todas as interfaces (nao tem
++    # opcao de endereco); a senha descartavel protege a porta.
++    senha=$(tr -dc 'A-Za-z0-9' </dev/urandom 2>/dev/null | head -c 8)
++    mkdir -p "$dir/krfb-config"
++    python3 - "$senha" "$lporta" "$dir/krfb-config/krfbrc" <<'EOF' ||
++import sys
++senha, porta, arquivo = sys.argv[1:4]
++obscura = "".join(c if ord(c) <= 0x21 else chr(0x1001F - ord(c)) for c in senha)
++with open(arquivo, "w", encoding="utf-8") as f:
++    f.write("[MainWindow]\nstartMinimized=true\n\n"
++            "[TCP]\nuseDefaultPort=false\nport=%s\npublishService=false\n\n"
++            "[Security]\nnoWallet=true\nallowDesktopControl=true\n"
++            "allowUnattendedAccess=true\nunattendedPassword=%s\n\n"
++            "[FrameBuffer]\npreferredFrameBufferPlugin=pw\n" % (porta, obscura))
++EOF
++        erro "nao consegui gravar a configuracao do krfb"
++    # Autoriza o krfb no portal, para o Plasma nao perguntar ao professor.
++    if permission_store Lookup string:kde-authorized string:remote-desktop |
++        grep -q '"org.kde.krfb"'; then
++        autorizado=1
++    fi
++    permission_store SetPermission string:kde-authorized boolean:true \
++        string:remote-desktop string:org.kde.krfb array:string:yes >/dev/null
++    XDG_CONFIG_HOME="$dir/krfb-config" krfb --nodialog >"$dir/krfb.log" 2>&1 &
++    gpid=$!
++    espera_porta "$lporta" "$gpid" ||
++        erro "o krfb nao subiu: $(tail -n 5 "$dir/krfb.log" 2>/dev/null)"
++    # A porta abre antes da captura: ate a primeira imagem a tela do krfb tem
++    # 0x0. Espera ate 15 s o stream do PipeWire (a linha do kpipewire no log)
++    # e mais 1 s para a primeira imagem.
++    tentativa=0
++    while [ "$tentativa" -lt 75 ] && kill -0 "$gpid" 2>/dev/null &&
++        ! grep -q kpipewire "$dir/krfb.log" 2>/dev/null; do
++        tentativa=$((tentativa + 1))
++        sleep 0.2
++    done
++    sleep 1
++    kill -0 "$gpid" 2>/dev/null ||
++        erro "o krfb parou: $(tail -n 5 "$dir/krfb.log" 2>/dev/null)"
 +    X11VNC_REFLECT_PASSWORD=$senha
 +    export X11VNC_REFLECT_PASSWORD
 +    ;;

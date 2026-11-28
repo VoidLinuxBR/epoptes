@@ -21,7 +21,7 @@ license=(GPL3)
 arch=(any)
 sha256sums=(
 	'SKIP'
-	'822c8e808311937e4e088a49882b44c4b051705f627e74c55402f2bab8e54d4b'
+	'dfaddf98f1bd91cc985c11a3e81b7758c0eca0fae9f839c4033835bc08a2f566'
 )
 
 # o que os DOIS usam
@@ -87,7 +87,8 @@ package_voidbr-epoptes() {
 	)
 	# wayvnc -> transmitir tela com o professor em Hyprland/Sway/wlroots.
 	# No GNOME com Wayland a transmissao usa gnome-remote-desktop e libsecret,
-	# que NAO entram aqui (sem eles o servidor avisa ao transmitir).
+	# que NAO entram aqui (sem eles o servidor avisa ao transmitir). No KDE
+	# Plasma usa o krfb do VoidBR (com patch, voidbr-pkgmake), que tambem nao.
 	optdepends=('xfce4-notifyd: XFCE notification support')
 	backup=(/etc/default/epoptes)
 

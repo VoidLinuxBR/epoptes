@@ -7,7 +7,7 @@
 pkgname=(chili-epoptes chili-epoptes-client)
 pkgbase=chili-epoptes
 _reponame=epoptes
-pkgver=20261127.2259
+pkgver=20261127.2311
 pkgrel=1
 pkgdesc='An opensource computer lab management and monitoring tool'
 arch=(any)
@@ -36,7 +36,7 @@ source=(
 )
 sha256sums=(
 	'SKIP'
-	'822c8e808311937e4e088a49882b44c4b051705f627e74c55402f2bab8e54d4b'
+	'dfaddf98f1bd91cc985c11a3e81b7758c0eca0fae9f839c4033835bc08a2f566'
 )
 
 # arquivos que sao so do cliente (o resto da arvore e do servidor)
@@ -101,6 +101,7 @@ package_chili-epoptes() {
 		'xfce4-notifyd: XFCE notification support'
 		'gnome-remote-desktop: transmitir tela com o professor no GNOME com Wayland'
 		'libsecret: secret-tool, senha da transmissao no GNOME com Wayland'
+		'krfb: transmitir tela com o professor no KDE Plasma (o do VoidBR, com patch)'
 	)
 	provides=(epoptes)
 	conflicts=(epoptes)
