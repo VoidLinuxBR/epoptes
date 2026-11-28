@@ -7,7 +7,7 @@
 pkgname=(chili-epoptes chili-epoptes-client)
 pkgbase=chili-epoptes
 _reponame=epoptes
-pkgver=20261127.1930
+pkgver=20261127.2229
 pkgrel=1
 pkgdesc='An opensource computer lab management and monitoring tool'
 arch=(any)
@@ -36,7 +36,7 @@ source=(
 )
 sha256sums=(
 	'SKIP'
-	'56657fc82fd6271c7ddb902fe35607272ea5790e7263f144d242a330105c5e01'
+	'7c41cd54eedeec5546c945b2c3274e6557550e99eb9f159b43cf1903d27108b6'
 )
 
 # arquivos que sao so do cliente (o resto da arvore e do servidor)
@@ -150,6 +150,7 @@ package_chili-epoptes-client() {
 		'gnome-remote-desktop: observar/assistir em GNOME com Wayland'
 		'libsecret: secret-tool, senha do observar/assistir em GNOME'
 		'xdg-desktop-portal-gnome: thumbshots em GNOME com Wayland'
+		'krfb: observar/assistir em KDE Plasma com Wayland (o do VoidBR, com patch)'
 	)
 	provides=(epoptes-client)
 	conflicts=(epoptes-client)

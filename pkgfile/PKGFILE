@@ -21,7 +21,7 @@ license=(GPL3)
 arch=(any)
 sha256sums=(
 	'SKIP'
-	'56657fc82fd6271c7ddb902fe35607272ea5790e7263f144d242a330105c5e01'
+	'7c41cd54eedeec5546c945b2c3274e6557550e99eb9f159b43cf1903d27108b6'
 )
 
 # o que os DOIS usam
@@ -122,6 +122,8 @@ package_voidbr-epoptes-client() {
 	# GNOME com Wayland usa pacotes do proprio GNOME, que NAO entram aqui
 	# (sem eles o servidor avisa): gnome-remote-desktop, libsecret,
 	# xdg-desktop-portal-gnome. Void/xbps nao tem optdepends.
+	# KDE Plasma com Wayland: krfb do VoidBR (com patch, voidbr-pkgmake), que
+	# tambem NAO entra aqui (puxaria o KDE para quem nao usa Plasma).
 	depends+=(
 		dbus
 		grim

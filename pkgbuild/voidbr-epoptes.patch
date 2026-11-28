@@ -83,10 +83,10 @@ index ac7b570..848abb8 100755
      path = os.path.expanduser('~/.config')
      if not os.path.isdir(path):
 diff --git a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-index 720c958..90f4cf4 100644
+index 720c958..fb4386b 100644
 --- a/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
 +++ b/usr/lib/python3.14/site-packages/epoptes/ui/gui.py
-@@ -4,10 +4,61 @@
+@@ -4,10 +4,65 @@
  # SPDX-License-Identifier: GPL-3.0-or-later
  """
  Epoptes GUI class.
@@ -139,6 +139,10 @@ index 720c958..90f4cf4 100644
 +     e formatacao das mensagens, zoom da fonte, nomes reais e o intervalo
 +     da conferencia de usuarios logados. Tudo vale na hora e fica na secao
 +     [GUI] do ~/.config/epoptes/settings de cada professor.
++ 12. Observar/Assistir no KDE Plasma com Wayland, pelo krfb (ver o item 13
++     do client-functions), com a mesma senha do item 8. O krfb nao tem modo
++     so de ver que funcione sozinho; por isso no Observar o visualizador
++     TigerVNC abre com -ViewOnly (vale para todos os clientes).
  """
  from distutils.version import LooseVersion
  import os
@@ -149,7 +153,7 @@ index 720c958..90f4cf4 100644
  import random
  import socket
  import string
-@@ -21,13 +72,16 @@ from epoptes.ui.about import About
+@@ -21,13 +76,16 @@ from epoptes.ui.about import About
  from epoptes.ui.benchmark import Benchmark
  from epoptes.ui.client_information import ClientInformation
  from epoptes.ui.common import gettext as _
@@ -167,7 +171,7 @@ index 720c958..90f4cf4 100644
  
  
  class EpoptesGui(object):
-@@ -77,8 +131,17 @@ class EpoptesGui(object):
+@@ -77,8 +135,17 @@ class EpoptesGui(object):
          self.vncserver = None
          self.vncserver_port = None
          self.vncserver_pwd = None
@@ -185,7 +189,7 @@ index 720c958..90f4cf4 100644
  
          self.builder = Gtk.Builder()
          self.builder.add_from_file('epoptes.ui')
-@@ -98,7 +161,11 @@ class EpoptesGui(object):
+@@ -98,7 +165,11 @@ class EpoptesGui(object):
          self.set_labels_order(1, 0, None)
          self.icv_clients.set_model(self.cstore)
          self.icv_clients.set_pixbuf_column(C_PIXBUF)
@@ -198,7 +202,7 @@ index 720c958..90f4cf4 100644
          self.cstore.set_sort_column_id(C_LABEL, Gtk.SortType.ASCENDING)
          self.on_icv_clients_selection_changed(None)
          self.icv_clients.enable_model_drag_source(
-@@ -167,6 +234,14 @@ class EpoptesGui(object):
+@@ -167,6 +238,14 @@ class EpoptesGui(object):
          mitem.set_active(True)
          self.get('cmi_show_real_names').set_active(self.show_real_names)
          self.mainwin.set_sensitive(False)
@@ -213,7 +217,7 @@ index 720c958..90f4cf4 100644
  
      def save_settings(self):
          """Helper function for on_imi_file_quit_activate."""
-@@ -187,8 +262,7 @@ class EpoptesGui(object):
+@@ -187,8 +266,7 @@ class EpoptesGui(object):
      def on_imi_file_quit_activate(self, _widget):
          """Handle imi_file_quit.activate and wnd_main.destroy events."""
          self.save_settings()
@@ -223,7 +227,7 @@ index 720c958..90f4cf4 100644
          if self.vncviewer is not None:
              self.vncviewer.kill()
          # noinspection PyUnresolvedReferences
-@@ -276,38 +350,86 @@ class EpoptesGui(object):
+@@ -276,38 +354,92 @@ class EpoptesGui(object):
  
      def reverse_connection(self, cmd, *args):
          """Helper function for on_imi_broadcasts_*_activate."""
@@ -307,6 +311,9 @@ index 720c958..90f4cf4 100644
 +                   str(self.vncviewer_port-5500)]
 +        elif viewer == 'xtigervncviewer':
 +            scmd = ['xtigervncviewer', '-listen', str(self.vncviewer_port)]
++            # VoidBR patch: Observar so olha (ver o item 12 no topo)
++            if cmd == 'get_monitored':
++                scmd.append('-ViewOnly')
 +        elif viewer == 'xtightvncviewer':
 +            scmd = ['xtightvncviewer', '-listen',
 +                   str(self.vncviewer_port-5500)]
@@ -316,6 +323,9 @@ index 720c958..90f4cf4 100644
 +        else:
 +            # A generic vncviewer, e.g. tigervnc on Arch/Fedora/SUSE
 +            scmd = ['vncviewer', '-listen', str(self.vncviewer_port)]
++            # VoidBR patch: Observar so olha (ver o item 12 no topo)
++            if cmd == 'get_monitored':
++                scmd.append('-ViewOnly')
 +        # VoidBR patch: senha nova a cada Observar/Assistir, so usada pelos
 +        # clientes GNOME (o servidor VNC do GNOME exige senha); o TigerVNC a
 +        # le de VNC_PASSWORD. Vai como ultimo parametro do get_monitored
@@ -340,7 +350,7 @@ index 720c958..90f4cf4 100644
  
      def on_imi_broadcasts_monitor_user_activate(self, _widget):
          """Handle imi_sbroadcasts_monitor_user.activate event."""
-@@ -323,6 +445,9 @@ class EpoptesGui(object):
+@@ -323,6 +455,9 @@ class EpoptesGui(object):
  
      def broadcast_screen(self, fullscreen=''):
          """Helper function for on_imi_broadcasts_broadcast_screen*_activate."""
@@ -350,7 +360,7 @@ index 720c958..90f4cf4 100644
          if self.vncserver is None:
              pwdfile = config.expand_filename('vncpasswd')
              pwd = ''.join(random.sample(
-@@ -332,11 +457,18 @@ class EpoptesGui(object):
+@@ -332,11 +467,18 @@ class EpoptesGui(object):
                  pwd = file.read()
              self.vncserver_port = self.find_unused_port()
              self.vncserver_pwd = ''.join('\\%o' % c for c in pwd)
@@ -374,7 +384,7 @@ index 720c958..90f4cf4 100644
          # Running `xdg-screensaver reset` as root doesn't reset the D.E.
          # screensaver, so send the reset command to both epoptes processes
          self.exec_on_selected_clients(
-@@ -344,6 +476,66 @@ class EpoptesGui(object):
+@@ -344,6 +486,66 @@ class EpoptesGui(object):
          self.exec_on_selected_clients(
              'receive_broadcast "${GUI_IP}:%d" "%s" %s' % (self.vncserver_port,
              self.vncserver_pwd, fullscreen), mode=EM_SYSTEM_OR_SESSION)
@@ -441,7 +451,7 @@ index 720c958..90f4cf4 100644
  
      def on_imi_broadcasts_broadcast_screen_fullscreen_activate(self, _widget):
          """Handle imi_broadcasts_broadcast_screen_fullscreen.activate event."""
-@@ -357,9 +549,27 @@ class EpoptesGui(object):
+@@ -357,9 +559,27 @@ class EpoptesGui(object):
          """Handle imi_broadcasts_stop_broadcasts.activate event."""
          self.exec_on_clients(['stop_receptions'], self.cstore,
                               mode=EM_SYSTEM_AND_SESSION)
@@ -472,7 +482,7 @@ index 720c958..90f4cf4 100644
  
      # TODO: Should we allow for running arbitrary commands in clients?
      def on_imi_execute_execute_command_activate(self, _widget):
-@@ -504,6 +714,100 @@ class EpoptesGui(object):
+@@ -504,6 +724,100 @@ class EpoptesGui(object):
          subprocess.Popen('./remote_assistance.py',
                           cwd='/usr/share/epoptes-client')
  
@@ -573,7 +583,7 @@ index 720c958..90f4cf4 100644
      def on_imi_help_about_activate(self, _widget):
          """Handle imi_help_about_activate.activate event."""
          if not self.about:
-@@ -629,6 +933,12 @@ class EpoptesGui(object):
+@@ -629,6 +943,12 @@ class EpoptesGui(object):
              single_client = True
          self.get('imi_clients_information').set_sensitive(single_client)
          self.get('tlb_clients_information').set_sensitive(single_client)
@@ -586,7 +596,7 @@ index 720c958..90f4cf4 100644
  
          if selected:
              self.get('mni_add_to_group').set_sensitive(True)
-@@ -764,6 +1074,9 @@ class EpoptesGui(object):
+@@ -764,6 +1084,9 @@ class EpoptesGui(object):
                  client_.set_offline()
  
          LOG.w("Disconnect from", handle)
@@ -596,7 +606,7 @@ index 720c958..90f4cf4 100644
          client = None
          for client in structs.clients:
              if client.hsystem == handle:
-@@ -813,12 +1126,12 @@ class EpoptesGui(object):
+@@ -813,12 +1136,12 @@ class EpoptesGui(object):
          if client.users:
              for hsession, user in client.users.items():
                  self.cstore.append(
@@ -611,7 +621,7 @@ index 720c958..90f4cf4 100644
                   self.imagetypes[client.type], client, ''])
  
      def fill_icon_view(self, group, keep_selection=False):
-@@ -923,9 +1236,11 @@ class EpoptesGui(object):
+@@ -923,9 +1246,11 @@ class EpoptesGui(object):
  
          # Update/fill the client information
          client.type, client.hostname = type_, host
@@ -623,7 +633,7 @@ index 720c958..90f4cf4 100644
          else:
              # This is a user epoptes-client
              client.add_user(user, name, handle)
-@@ -949,7 +1264,711 @@ class EpoptesGui(object):
+@@ -949,7 +1274,712 @@ class EpoptesGui(object):
              user = row[C_INSTANCE].users[row[C_SESSION_HANDLE]][label]
          else:
              user = ''
@@ -1082,9 +1092,10 @@ index 720c958..90f4cf4 100644
 +        vnc = vnc.split(',') if vnc is not None else None
 +        if session == 'wayland':
 +            if 'KDE' in desktop or 'PLASMA' in desktop:
-+                return ('KDE no Wayland ainda n\u00e3o tem servidor VNC '
-+                        'compat\u00edvel (o wayvnc funciona em Hyprland, '
-+                        'Sway e outros wlroots; o GNOME usa o pr\u00f3prio)')
++                if vnc is not None and 'krfb' not in vnc:
++                    return ('falta o pacote krfb no cliente (o servidor VNC '
++                            'do KDE, com o patch do VoidBR)')
++                return ''
 +            if 'GNOME' in desktop:
 +                if vnc is not None and 'grd' not in vnc:
 +                    return ('falta o pacote gnome-remote-desktop no cliente '
@@ -1336,7 +1347,7 @@ index 720c958..90f4cf4 100644
  
      def calculate_label(self, client, username=''):
          """Return the iconview label from a hostname/alias and a username,
-@@ -1000,6 +2019,21 @@ class EpoptesGui(object):
+@@ -1000,6 +2030,21 @@ class EpoptesGui(object):
              del self.current_thumbshots[handle]
          return False
  
@@ -1358,7 +1369,7 @@ index 720c958..90f4cf4 100644
      def got_thumbshot(self, handle, reply):
          """Callback after running`thumbshot` on a client."""
          for i in self.cstore:
-@@ -1007,11 +2041,21 @@ class EpoptesGui(object):
+@@ -1007,11 +2052,21 @@ class EpoptesGui(object):
                  # Ask for a new thumbshot THUMBSHOT_MS msec after the last one.
                  # So if the client is too stressed and needs e.g. 7 secs to
                  # send a thumbshot, we'll ask for one every 12 secs.
@@ -1381,7 +1392,7 @@ index 720c958..90f4cf4 100644
                  try:
                      rowstride, size, pixels = reply.split(b'\n', 2)
                      rowstride = int(rowstride)
-@@ -1059,7 +2103,7 @@ class EpoptesGui(object):
+@@ -1059,7 +2114,7 @@ class EpoptesGui(object):
          # ${GUI_PY} must be unquoted, don't pass it as list
          if isinstance(command, list) and len(command) > 0:
              command = '%s %s' % (command[0], ' '.join(
@@ -2247,6 +2258,57 @@ index 557829c..eeadacc 100755
  
  
  def main():
+diff --git a/usr/share/epoptes/LEIAME.md b/usr/share/epoptes/LEIAME.md
+index ba9679d..be7443a 100644
+--- a/usr/share/epoptes/LEIAME.md
++++ b/usr/share/epoptes/LEIAME.md
+@@ -170,7 +170,7 @@ Ajuda > Manual do VoidBR (ou F1) mostra este texto. Ajuda > Sobre mostra os cré
+ | X11 (qualquer ambiente) | sim | sim (x11vnc) |
+ | Hyprland, Sway, river, labwc | sim (grim) | sim (wayvnc) |
+ | GNOME com Wayland | a cada 60 s (portal) | sim (VNC do GNOME) |
+-| KDE Plasma com Wayland | sim (spectacle) | não (veja abaixo) |
++| KDE Plasma com Wayland | sim (spectacle) | sim (krfb com o patch do VoidBR) |
+ 
+ As outras funções (mensagem, bloquear tela, terminal) seguem o Epoptes original e não foram testadas no Wayland.
+ 
+@@ -190,7 +190,7 @@ Os alunos não mudam nada: recebem a transmissão do mesmo jeito que de um profe
+ | X11 | x11vnc |
+ | GNOME com Wayland | x11vnc, gnome-remote-desktop, libsecret (secret-tool) |
+ | Hyprland, Sway e outros wlroots | x11vnc, wayvnc |
+-| KDE Plasma com Wayland | não funciona (veja KDE Plasma com Wayland) |
++| KDE Plasma com Wayland | ainda não funciona |
+ 
+ - No GNOME, enquanto transmite, aparece no canto superior direito do professor o indicador de tela compartilhada. Clicar nele para parar encerra a transmissão.
+ - Se o compartilhamento de tela do GNOME já estiver ligado (Configurações > Sistema > Área de trabalho remota), a transmissão não abre; desligue-o antes.
+@@ -271,10 +271,25 @@ O Observar/Assistir precisa do chaveiro do GNOME (gnome-keyring) rodando, porque
+ | Função | Situação |
+ |---|---|
+ | Miniatura | funciona, pelo spectacle (testado) |
+-| Observar e Assistir | não funciona |
+-| Transmitir tela com o professor no Plasma | não funciona |
++| Observar e Assistir | funciona, pelo krfb com o patch do VoidBR (testado) |
++| Transmitir tela com o professor no Plasma | ainda não funciona |
+ 
+-O Plasma não deixa o wayvnc capturar a tela e não tem um servidor VNC próprio como o do GNOME. O servidor VNC do KDE, o krfb, no Wayland passa pelo portal de captura de tela, e o portal pede aprovação na máquina, numa janela "Controle remoto solicitado", a cada vez que ele sobe; a opção de acesso sem supervisão do krfb não evita isso. No Void, sem systemd, o portal ainda não identifica o programa ("aplicativo não identificado"), então nem a pré-autorização pelo nome do programa vale. Nos testes, a porta VNC não abriu sem essa aprovação, e a janela nem sempre aparecia para ser clicada. Numa sala de aula o Epoptes não pode depender de alguém aprovar em cada máquina, então o Observar, o Assistir e a transmissão ficam de fora no Plasma Wayland. Até o Plasma 6.7 dava para usar a sessão Plasma X11, em que tudo funciona pelo x11vnc; a partir do Plasma 6.8 a KDE removeu a sessão X11, e o Plasma passou a ser só Wayland.
++O Plasma não deixa o wayvnc capturar a tela. O Epoptes usa o servidor VNC do próprio KDE, o krfb, que no Wayland captura a tela pelo portal. O portal só libera sem perguntar ao aluno ("Controle remoto solicitado") se souber qual programa está pedindo, e no Void, sem systemd, o krfb original aparece como "aplicativo não identificado". Por isso o cliente precisa do **krfb do VoidBR** (receita em VoidLinuxBR/voidbr-pkgmake, templates/krfb, para Void e Arch), que se identifica no portal como org.kde.krfb.
++
++A cada Observar/Assistir o cliente:
++
++1. autoriza o org.kde.krfb no portal (tabela kde-authorized), para não aparecer a janela de permissão;
++2. sobe um krfb só para isso, numa porta livre, com a senha que o servidor manda e uma configuração própria, sem mexer no ~/.config/krfbrc nem na carteira do aluno;
++3. liga a tela do aluno ao visualizador do servidor pelo socat, como no wayvnc.
++
++No fim encerra o krfb, apaga a configuração e tira a autorização do portal (se ela não existia antes).
++
++- Enquanto o professor observa, o Plasma mostra ao aluno, na bandeja, o ícone de tela compartilhada.
++- O krfb não tem modo só de ver sem desligar o início automático; no Observar, quem impede o controle é o visualizador do servidor, que abre com -ViewOnly (TigerVNC).
++- O krfb escuta em todas as interfaces de rede (não tem opção de endereço), mas a senha muda a cada Observar/Assistir.
++- Se o aluno já estiver com o krfb aberto, o Observar não abre (o krfb só roda uma vez por sessão); feche-o antes.
++- O registro do krfb fica em $XDG_RUNTIME_DIR/epoptes-client/krfb.log no cliente.
++- Pacotes no cliente: krfb (do VoidBR), socat e python3.
+ 
+ - Para a miniatura, o cliente precisa do spectacle (dependência do pacote do cliente).
+ - Se o portal não oferecer a captura de tela no Plasma, confira se não há um ~/.config/xdg-desktop-portal/portals.conf feito para outro ambiente (por exemplo, com default=gtk;wlr, para o Hyprland). Esse arquivo vale para todos os ambientes e passa por cima do kde-portals.conf do Plasma. Renomeie-o para o nome do ambiente a que se destina (hyprland-portals.conf, sway-portals.conf...) ou remova-o, e saia e entre de novo na sessão.
 diff --git a/usr/share/epoptes/about.ui b/usr/share/epoptes/about.ui
 index 22edcde..9c30a47 100644
 --- a/usr/share/epoptes/about.ui
@@ -2445,10 +2507,10 @@ index 0000000..27f1928
 +done
 +limpa
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..07f8234 100644
+index d54ba3b..832f571 100644
 --- a/usr/share/epoptes/client-functions
 +++ b/usr/share/epoptes/client-functions
-@@ -6,6 +6,134 @@
+@@ -6,6 +6,148 @@
  # Implements the client side of the epoptes communications protocol.
  # The daemon reads this file when it starts, and sends it to clients when they
  # connect. The clients actually source it and then wait for further commands.
@@ -2579,11 +2641,25 @@ index d54ba3b..07f8234 100644
 +#     (Wayland ou X) ainda existir, como o vigia e o epoptes-client --check.
 +#     Um processo que sobrou de uma sessao encerrada dava o selo "Sessao nao
 +#     conectou" sem ninguem logado.
++#
++# 13. Observar/Assistir no KDE Plasma com Wayland, pelo krfb (o servidor VNC
++#     do KDE). kde_vnc_session() (nova) sobe um krfb so para o
++#     Observar/Assistir, numa porta livre, com a senha que o servidor do
++#     Epoptes manda e com uma configuracao propria (XDG_CONFIG_HOME
++#     temporario, sem tocar no krfbrc nem na carteira do usuario), e faz a
++#     ponte com o socat, como no wayvnc. Antes autoriza o org.kde.krfb no
++#     portal (tabela kde-authorized), para nao aparecer a janela de
++#     permissao; no fim apaga essa autorizacao, se ela nao existia antes.
++#     Precisa do krfb com o patch do VoidBR (pacote krfb do voidbr-pkgmake),
++#     que se identifica no portal como org.kde.krfb mesmo sem systemd. O
++#     krfb escuta em todas as interfaces (nao tem opcao de endereco), mas a
++#     senha muda a cada Observar/Assistir. O Plasma mostra ao aluno o
++#     indicador de tela compartilhada.
 +# ============================================================================
  
  # Dash handles signals a bit differently from bash.
  # We need to trap both 0 and 15 otherwise the trap function isn't called at all.
-@@ -20,8 +148,13 @@ on_signal() {
+@@ -20,8 +162,13 @@ on_signal() {
  
      code="$?"
      trap - 0 15
@@ -2598,7 +2674,7 @@ index d54ba3b..07f8234 100644
          systemctl list-jobs | grep -q 'shutdown.target[[:space:]]*start'; then
          echo "epoptes-client got signal: $1, but system is shutting down" >&5
      else
-@@ -60,16 +193,64 @@ ensure_display() {
+@@ -60,16 +207,64 @@ ensure_display() {
      fi
  }
  
@@ -2663,7 +2739,7 @@ index d54ba3b..07f8234 100644
      xprop -root -remove "$1"
  }
  
-@@ -139,14 +320,32 @@ info() {
+@@ -139,14 +334,32 @@ info() {
          else
              server_ip=$(getent hosts "$SERVER" | awk '{ print $1; exit }')
              server_ip=${server_ip:-$SERVER}
@@ -2702,7 +2778,7 @@ index d54ba3b..07f8234 100644
              MAC=$(main_mac)
              MAC=${MAC%% *}
              test -n "$MAC" || die "Empty MAC"
-@@ -177,9 +376,224 @@ cpu=$CPU
+@@ -177,9 +390,234 @@ cpu=$CPU
  ram=$RAM
  vga=$VGA
  os=$OS
@@ -2723,6 +2799,8 @@ index d54ba3b..07f8234 100644
 +    if grd_daemon >/dev/null && command -v secret-tool >/dev/null 2>&1; then
 +        list="${list:+$list,}grd"
 +    fi
++    # krfb: o servidor VNC do KDE (Plasma com Wayland)
++    command -v krfb >/dev/null 2>&1 && list="${list:+$list,}krfb"
 +    echo "$list"
 +}
 +
@@ -2747,6 +2825,14 @@ index d54ba3b..07f8234 100644
 +gnome_session() {
 +    case ":$XDG_CURRENT_DESKTOP:" in
 +    *:GNOME:*) return 0 ;;
++    esac
++    return 1
++}
++
++# VoidBR patch: sessao grafica KDE Plasma?
++kde_session() {
++    case ":$XDG_CURRENT_DESKTOP:" in
++    *:KDE:*) return 0 ;;
 +    esac
 +    return 1
 +}
@@ -2927,7 +3013,7 @@ index d54ba3b..07f8234 100644
  # Execute a command in the background and optionally print its pid.
  # For internal use. Parameters:
  # [-p]   = print the pid.
-@@ -260,17 +674,27 @@ shutdown() {
+@@ -260,17 +698,27 @@ shutdown() {
  # $2 = thumbshot height.
  thumbshot() {
      # TODO: remove compatibility fallback after a few versions
@@ -2957,7 +3043,7 @@ index d54ba3b..07f8234 100644
      fi
  }
  
-@@ -378,19 +802,251 @@ message() {
+@@ -378,19 +826,392 @@ message() {
      fi
  }
  
@@ -3179,14 +3265,153 @@ index d54ba3b..07f8234 100644
 +    timeout 60 secret-tool clear xdg:schema "$xdg" epoptes 1
 +}
 +
++# VoidBR patch: Observar/Assistir no KDE Plasma com Wayland, pelo krfb (ver o
++# item 13 no topo). Roda em segundo plano: o krfb leva alguns segundos para
++# combinar a captura de tela com o portal, e este shell nao pode ficar preso
++# (o servidor manda os pings por ele).
++# Parameters:
++# $1 = host:port.
++# $2 = viewonly ou assist.
++# $3 = senha do VNC, gerada pelo servidor do Epoptes.
++kde_reverse_vnc() {
++    local c
++
++    for c in krfb socat dbus-send python3 ss; do
++        if ! command -v "$c" >/dev/null 2>&1; then
++            echo "kde_reverse_vnc: $c nao encontrado" >&5
++            return 1
++        fi
++    done
++    if [ -z "$3" ]; then
++        echo "kde_reverse_vnc: o servidor nao mandou a senha do VNC" >&5
++        return 1
++    fi
++    kde_vnc_stop
++    background kde_vnc_session "$1" "$2" "$3"
++}
++
++# VoidBR patch: encerra o Observar/Assistir do KDE em andamento. Basta
++# encerrar o krfb: o socat termina junto e o kde_vnc_session faz a limpeza.
++kde_vnc_stop() {
++    local pid
++
++    pid=$(xprop_get EPOPTES_KRFB_PID)
++    if [ -n "$pid" ] && kill "$pid" 2>/dev/null; then
++        sleep 1
++    fi
++}
++
++# VoidBR patch: chama o PermissionStore do portal ($1 = metodo, o resto vai
++# como argumentos do dbus-send).
++kde_permission_store() {
++    local metodo="$1"
++
++    shift
++    dbus-send --session --print-reply \
++        --dest=org.freedesktop.impl.portal.PermissionStore \
++        /org/freedesktop/impl/portal/PermissionStore \
++        "org.freedesktop.impl.portal.PermissionStore.$metodo" "$@" 2>/dev/null
++}
++
++# VoidBR patch: uma sessao do Observar/Assistir no KDE, do comeco ao fim.
++# Parameters: $1 = host:port, $2 = viewonly ou assist, $3 = senha.
++kde_vnc_session() {
++    local target="$1" mode="$2" pwd="$3" dir cfgdir port kpid tentativa
++    local autorizado=""
++
++    dir=$(wayland_state_dir)
++    cfgdir="$dir/krfb-config"
++    # O krfb e de instancia unica: se o usuario ja tem um aberto, o nosso so
++    # acordaria o dele e sairia.
++    if pgrep -u "$UID" -x krfb >/dev/null; then
++        echo "kde_vnc_session: o krfb ja esta aberto nesta sessao" >&5
++        return 1
++    fi
++    port=$(python3 -c '
++import socket
++s = socket.socket()
++s.bind(("127.0.0.1", 0))
++print(s.getsockname()[1])
++s.close()
++' 2>/dev/null)
++    if [ -z "$port" ]; then
++        echo "kde_vnc_session: nao consegui escolher uma porta livre" >&5
++        return 1
++    fi
++
++    # Configuracao propria do krfb: senhas no krfbrc (noWallet), acesso sem
++    # confirmacao (allowUnattendedAccess) com a senha do Epoptes, a porta
++    # escolhida e sem anuncio na rede. O krfb guarda a senha "embaralhada"
++    # pelo KStringHandler::obscure: cada caractere c acima de "!" vira
++    # 0x1001F - c. O Observar so olha porque o visualizador do servidor
++    # abre em modo so de ver; o krfb nao tem esse modo sem desligar o inicio
++    # automatico do compartilhamento.
++    rm -rf "$cfgdir"
++    mkdir -p "$cfgdir"
++    if ! python3 - "$pwd" "$port" "$cfgdir/krfbrc" <<'EOF'
++import sys
++senha, porta, arquivo = sys.argv[1:4]
++obscura = "".join(c if ord(c) <= 0x21 else chr(0x1001F - ord(c)) for c in senha)
++with open(arquivo, "w", encoding="utf-8") as f:
++    f.write("[MainWindow]\nstartMinimized=true\n\n"
++            "[TCP]\nuseDefaultPort=false\nport=%s\npublishService=false\n\n"
++            "[Security]\nnoWallet=true\nallowDesktopControl=true\n"
++            "allowUnattendedAccess=true\nunattendedPassword=%s\n\n"
++            "[FrameBuffer]\npreferredFrameBufferPlugin=pw\n" % (porta, obscura))
++EOF
++    then
++        echo "kde_vnc_session: nao consegui gravar a configuracao do krfb" >&5
++        rm -rf "$cfgdir"
++        return 1
++    fi
++
++    # Autoriza o krfb no portal, para o Plasma nao perguntar ao aluno.
++    if kde_permission_store Lookup string:kde-authorized string:remote-desktop |
++        grep -q '"org.kde.krfb"'; then
++        autorizado=1
++    fi
++    kde_permission_store SetPermission string:kde-authorized boolean:true \
++        string:remote-desktop string:org.kde.krfb array:string:yes >/dev/null
++
++    XDG_CONFIG_HOME="$cfgdir" krfb --nodialog >"$dir/krfb.log" 2>&1 &
++    kpid=$!
++    xprop_set EPOPTES_KRFB_PID "$kpid"
++    # Espera ate 20 s o krfb comecar a escutar (conversa com o portal antes).
++    tentativa=0
++    while [ "$tentativa" -lt 100 ] && kill -0 "$kpid" 2>/dev/null &&
++        ! ss -Hltn "sport = :$port" 2>/dev/null | grep -q .; do
++        tentativa=$((tentativa + 1))
++        sleep 0.2
++    done
++    if kill -0 "$kpid" 2>/dev/null &&
++        ss -Hltn "sport = :$port" 2>/dev/null | grep -q .; then
++        # Termina quando o servidor do Epoptes fecha o visualizador, quando o
++        # aluno para o compartilhamento, ou no stop_receptions.
++        socat "TCP:$target" "TCP:127.0.0.1:$port"
++    else
++        echo "kde_vnc_session: o krfb nao subiu, veja $dir/krfb.log" >&5
++    fi
++
++    kill "$kpid" 2>/dev/null
++    wait "$kpid" 2>/dev/null
++    xprop_unset EPOPTES_KRFB_PID
++    if [ -z "$autorizado" ]; then
++        kde_permission_store DeletePermission string:kde-authorized \
++            string:remote-desktop string:org.kde.krfb >/dev/null
++    fi
++    rm -rf "$cfgdir"
++}
++
  # Connect to the server to be monitored.
  # Parameters:
  # $1 = host:port.
-+# $2 = VoidBR patch: senha do VNC (so o GNOME com Wayland usa).
++# $2 = VoidBR patch: senha do VNC (GNOME e KDE com Wayland usam).
  get_monitored() {
 -    background x11vnc -q -nopw -noshm -24to32 -viewonly -connect_or_exit "$1"
 +    if [ -n "$WAYLAND_DISPLAY" ] && gnome_session; then
 +        gnome_reverse_vnc "$1" viewonly "$2"
++    elif [ -n "$WAYLAND_DISPLAY" ] && kde_session; then
++        kde_reverse_vnc "$1" viewonly "$2"
 +    elif [ -n "$WAYLAND_DISPLAY" ]; then
 +        wayland_reverse_vnc "$1" viewonly
 +    else
@@ -3198,11 +3423,13 @@ index d54ba3b..07f8234 100644
  # Parameters:
  # $1 = host:port.
  # $2 = grab keyboard and mouse.
-+# $3 = VoidBR patch: senha do VNC (so o GNOME com Wayland usa).
++# $3 = VoidBR patch: senha do VNC (GNOME e KDE com Wayland usam).
  get_assisted() {
 -    background x11vnc -q -nopw -noshm -24to32 ${2:+-grabptr -grabkbd} -connect_or_exit "$1"
 +    if [ -n "$WAYLAND_DISPLAY" ] && gnome_session; then
 +        gnome_reverse_vnc "$1" assist "$3"
++    elif [ -n "$WAYLAND_DISPLAY" ] && kde_session; then
++        kde_reverse_vnc "$1" assist "$3"
 +    elif [ -n "$WAYLAND_DISPLAY" ]; then
 +        wayland_reverse_vnc "$1" assist
 +    else
@@ -3211,7 +3438,7 @@ index d54ba3b..07f8234 100644
  }
  
  # Deactivate the screensaver, in order for the users to watch a broadcast.
-@@ -468,7 +1124,7 @@ receive_broadcast() {
+@@ -468,7 +1289,7 @@ receive_broadcast() {
  # The vnc clients should automatically exit when the server is killed.
  # Unfortunately, that isn't always true, so try to kill them anyway.
  stop_receptions() {
@@ -3220,7 +3447,7 @@ index d54ba3b..07f8234 100644
  
      unset receiving_broadcast
      ensure_display
-@@ -477,6 +1133,14 @@ stop_receptions() {
+@@ -477,6 +1298,17 @@ stop_receptions() {
          kill "$pid"
          xprop_unset EPOPTES_VNCVIEWER_PID
      fi
@@ -3232,10 +3459,13 @@ index d54ba3b..07f8234 100644
 +    # VoidBR patch: Observar/Assistir do GNOME (a limpeza fica com ele)
 +    wpid=$(xprop_get EPOPTES_GRD_PID)
 +    test -z "$wpid" || kill "$wpid" 2>/dev/null
++    # VoidBR patch: Observar/Assistir do KDE (a limpeza fica com ele)
++    wpid=$(xprop_get EPOPTES_KRFB_PID)
++    test -z "$wpid" || kill "$wpid" 2>/dev/null
  }
  
  # Open a root terminal inside the X session.
-@@ -507,7 +1171,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
+@@ -507,7 +1339,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
  # exit automatically, so tell it to exit as soon as X is unavailable.
  ping() {
      if [ "$UID" -gt 0 ]; then
@@ -3250,7 +3480,7 @@ index d54ba3b..07f8234 100644
      fi
      if [ "$receiving_broadcast" = true ]; then
          reset_screensaver
-@@ -533,6 +1203,29 @@ info
+@@ -533,6 +1371,29 @@ info
  # Prevent dbus from getting autolaunched (issue #66)
  export "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/dev/null}"
  
