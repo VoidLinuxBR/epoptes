@@ -7,7 +7,7 @@
 pkgname=(chili-epoptes chili-epoptes-client)
 pkgbase=chili-epoptes
 _reponame=epoptes
-pkgver=20261127.2229
+pkgver=20261127.2248
 pkgrel=1
 pkgdesc='An opensource computer lab management and monitoring tool'
 arch=(any)
@@ -36,7 +36,7 @@ source=(
 )
 sha256sums=(
 	'SKIP'
-	'7c41cd54eedeec5546c945b2c3274e6557550e99eb9f159b43cf1903d27108b6'
+	'c6847ed4c10e0b7c1d3988cc53a47fcdfe3ea51ff6191bf4535b358090f4fd09'
 )
 
 # arquivos que sao so do cliente (o resto da arvore e do servidor)

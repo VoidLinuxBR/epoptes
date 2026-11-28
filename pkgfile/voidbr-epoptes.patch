@@ -2507,7 +2507,7 @@ index 0000000..27f1928
 +done
 +limpa
 diff --git a/usr/share/epoptes/client-functions b/usr/share/epoptes/client-functions
-index d54ba3b..832f571 100644
+index d54ba3b..2767b03 100644
 --- a/usr/share/epoptes/client-functions
 +++ b/usr/share/epoptes/client-functions
 @@ -6,6 +6,148 @@
@@ -3043,7 +3043,7 @@ index d54ba3b..832f571 100644
      fi
  }
  
-@@ -378,19 +826,392 @@ message() {
+@@ -378,19 +826,405 @@ message() {
      fi
  }
  
@@ -3383,6 +3383,19 @@ index d54ba3b..832f571 100644
 +        tentativa=$((tentativa + 1))
 +        sleep 0.2
 +    done
++    # O krfb abre a porta logo ao subir, antes de combinar a captura com o
++    # portal, e ate chegar a primeira imagem a tela dele tem tamanho 0x0: o
++    # TigerVNC que conecta nessa hora cai com "Attempted to configure an
++    # invalid screen layout". Espera ate 15 s o krfb abrir o stream do
++    # PipeWire (a linha do kpipewire no log) e mais 1 s para a primeira
++    # imagem.
++    tentativa=0
++    while [ "$tentativa" -lt 75 ] && kill -0 "$kpid" 2>/dev/null &&
++        ! grep -q kpipewire "$dir/krfb.log" 2>/dev/null; do
++        tentativa=$((tentativa + 1))
++        sleep 0.2
++    done
++    sleep 1
 +    if kill -0 "$kpid" 2>/dev/null &&
 +        ss -Hltn "sport = :$port" 2>/dev/null | grep -q .; then
 +        # Termina quando o servidor do Epoptes fecha o visualizador, quando o
@@ -3438,7 +3451,7 @@ index d54ba3b..832f571 100644
  }
  
  # Deactivate the screensaver, in order for the users to watch a broadcast.
-@@ -468,7 +1289,7 @@ receive_broadcast() {
+@@ -468,7 +1302,7 @@ receive_broadcast() {
  # The vnc clients should automatically exit when the server is killed.
  # Unfortunately, that isn't always true, so try to kill them anyway.
  stop_receptions() {
@@ -3447,7 +3460,7 @@ index d54ba3b..832f571 100644
  
      unset receiving_broadcast
      ensure_display
-@@ -477,6 +1298,17 @@ stop_receptions() {
+@@ -477,6 +1311,17 @@ stop_receptions() {
          kill "$pid"
          xprop_unset EPOPTES_VNCVIEWER_PID
      fi
@@ -3465,7 +3478,7 @@ index d54ba3b..832f571 100644
  }
  
  # Open a root terminal inside the X session.
-@@ -507,7 +1339,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
+@@ -507,7 +1352,13 @@ TERM=xterm exec socat EXEC:'screen $screen_params',pty,stderr tcp:$1"
  # exit automatically, so tell it to exit as soon as X is unavailable.
  ping() {
      if [ "$UID" -gt 0 ]; then
@@ -3480,7 +3493,7 @@ index d54ba3b..832f571 100644
      fi
      if [ "$receiving_broadcast" = true ]; then
          reset_screensaver
-@@ -533,6 +1371,29 @@ info
+@@ -533,6 +1384,29 @@ info
  # Prevent dbus from getting autolaunched (issue #66)
  export "DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/dev/null}"
  
